@@ -1,0 +1,17 @@
+all: d77_alsadrv
+
+llasm_c_files := ../websynth/llasm/asm-cpu.c ../websynth/llasm/asm-cpu-var.c ../websynth/llasm/functions-llasm.c ../websynth/llasm/llasm_float.c ../websynth/llasm/llasm_movs.c ../websynth/llasm/llasm_pushx.c ../websynth/llasm/llasm_stos.c
+llasm_h_files := ../websynth/llasm/llasm_cpu.h
+llasm_object_file := ../websynth/llasm/dswbsWDM.o
+llasm_source_file := ../websynth/llasm/dswbsWDM.llasm
+llasm_include_files := ../websynth/llasm/extern.llinc ../websynth/llasm/llasm.llinc ../websynth/llasm/llasm_float.llinc ../websynth/llasm/llasm_movs.llinc ../websynth/llasm/llasm_pushx.llinc ../websynth/llasm/llasm_stos.llinc ../websynth/llasm/macros.llinc ../websynth/llasm/seg01_code.llinc ../websynth/llasm/seg01_data.llinc ../websynth/llasm/seg02_data.llinc ../websynth/llasm/seg03_data.llinc ../websynth/llasm/seg05_data.llinc
+
+$(llasm_object_file): $(llasm_source_file) $(llasm_include_files)
+	llasm $(llasm_source_file) -O -inline-float | opt -O3 | llc -O=3 -filetype=obj -mtriple=thumbv7a-unknown-linux-eabi -float-abi=hard > $(llasm_object_file)
+
+d77_alsadrv: d77_alsadrv.c ../websynth/websynth.h $(llasm_c_files) $(llasm_h_files) $(llasm_object_file)
+	gcc -s -fno-PIE -O2 -Wall -no-pie -o d77_alsadrv d77_alsadrv.c $(llasm_c_files) $(llasm_object_file) -I../websynth -I../websynth/llasm -lasound -lpthread -lm
+
+.PHONY: clean
+clean:
+	rm -f d77_alsadrv $(llasm_object_file)

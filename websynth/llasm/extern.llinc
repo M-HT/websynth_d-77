@@ -1,0 +1,74 @@
+;;
+;;  Copyright (C) 2025 Roman Pauer
+;;
+;;  Permission is hereby granted, free of charge, to any person obtaining a copy of
+;;  this software and associated documentation files (the "Software"), to deal in
+;;  the Software without restriction, including without limitation the rights to
+;;  use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+;;  of the Software, and to permit persons to whom the Software is furnished to do
+;;  so, subject to the following conditions:
+;;
+;;  The above copyright notice and this permission notice shall be included in all
+;;  copies or substantial portions of the Software.
+;;
+;;  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+;;  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+;;  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+;;  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+;;  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+;;  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+;;  SOFTWARE.
+;;
+
+datasegment rand_data
+dlabel rand_value
+db 1
+db 0
+db 0
+db 0
+endd
+
+proc rand_asm
+
+; [esp] = return address
+
+        ;mov eax, [rand_value]
+        load tmp0, rand_value, 4
+
+        ;imul eax, 214013
+        mul tmp0, tmp0, 214013
+
+        ;add eax, 2531011
+        add tmp0, tmp0, 2531011
+
+        ;mov [rand_value], eax
+        store tmp0, rand_value, 4
+
+        ;sar eax, 16
+        ashr tmp0, tmp0, 16
+
+        ;and eax, 0x7fff
+        and eax, tmp0, 0x7fff
+
+        ;retn
+        POP tmp1
+        tcall tmp1
+
+endp ; end procedure rand_asm
+
+proc _ftol_asm
+
+; st0   = num
+; [esp] = return address
+
+        FTOL_INT64
+
+        load eax, tmp0, 4
+        add tmpadr, tmp0, 4
+        load edx, tmpadr, 4
+
+        POP tmp1
+        tcall tmp1
+
+endp ; end procedure _ftol_asm
+

@@ -1,0 +1,35 @@
+include llasm.llinc
+include extern.llinc
+include macros.llinc
+
+
+datasegment .text constant
+dlabel imagebase1000
+include seg01_data.llinc
+endd
+
+datasegment .rdata constant
+include seg02_data.llinc
+endd
+
+datasegment .data
+include seg03_data.llinc
+endd
+
+datasegment .bss uninitialized
+include seg05_data.llinc
+endd
+
+define loc_409C20 InitializeDataFile_asm
+define loc_409C50 InitializeSynth_asm
+define loc_409CE0 MidiMessageShort_asm
+define loc_40A260 MidiMessageLong_asm
+define loc_40A360 RenderSamples_asm
+define loc_40A3C0 InitializeMasterVolume_asm
+define loc_40A480 InitializeEffect_asm
+define loc_40A4D0 InitializeUnknown_asm
+define loc_40A540 InitializeCpuLoad_asm
+define loc_40A5A0 InitializeParameters_asm
+define loc_40A8F0 ValidateSettings_asm
+
+include seg01_code.llinc

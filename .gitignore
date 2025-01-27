@@ -1,0 +1,12 @@
+*.exe
+*.EXE
+*.o
+**/d77_alsadrv/d77_alsadrv
+**/d77_pcmconvert/d77_pcmconvert
+**/websynth-gen/*.asm
+**/websynth-gen/*.inc
+**/websynth-gen/*.llasm
+**/websynth-gen/*.llinc
+**/websynth-gen/*.resdump
+**/websynth-gen/*.a
+**/websynth-gen/*.sci

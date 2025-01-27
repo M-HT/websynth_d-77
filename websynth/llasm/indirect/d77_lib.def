@@ -1,0 +1,13 @@
+EXPORTS
+c_ValidateSettings_asm
+c_InitializeDataFile_asm
+c_InitializeSynth_asm
+c_InitializeUnknown_asm
+c_InitializeEffect_asm
+c_InitializeCpuLoad_asm
+c_InitializeParameters_asm
+c_InitializeMasterVolume_asm
+c_MidiMessageShort_asm
+c_MidiMessageLong_asm
+c_RenderSamples_asm
+dwRenderedSamplesPerCall_asm
