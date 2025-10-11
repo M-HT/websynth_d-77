@@ -12,10 +12,10 @@ $(llasm_object_file): $(llasm_source_file) $(llasm_include_files)
 	llasm $(llasm_source_file) -O -m64 -pic -inline-float | opt -O3 | llc -O=3 -filetype=obj -mtriple=arm64-unknown-linux-gnu --relocation-model=pic > $(llasm_object_file)
 
 d77_pcmconvert: d77_pcmconvert.c midi_loader.c midi_loader.h ../websynth/websynth.h $(llasm_indirect_c_files) $(llasm_indirect_h_files)
-	gcc -s -O2 -Wall -DINDIRECT_64BIT -o d77_pcmconvert d77_pcmconvert.c midi_loader.c $(llasm_indirect_c_files) -I../websynth -I../websynth/llasm -I../websynth/llasm/indirect -lm
+	$(CC) -s -O2 -Wall -DINDIRECT_64BIT -o d77_pcmconvert d77_pcmconvert.c midi_loader.c $(llasm_indirect_c_files) -I../websynth -I../websynth/llasm -I../websynth/llasm/indirect -lm
 
 d77_lib.so: $(llasm_lib_c_files) $(llasm_lib_h_files) $(llasm_object_file)
-	gcc -s -nostdlib -fpic -O2 -Wall -fvisibility=hidden -fno-ident -shared -Wl,-soname,d77_lib.so -o d77_lib.so $(llasm_lib_c_files) $(llasm_object_file) -I../websynth/llasm
+	$(CC) -s -nostdlib -fpic -O2 -Wall -fvisibility=hidden -fno-ident -shared -Wl,-soname,d77_lib.so -o d77_lib.so $(llasm_lib_c_files) $(llasm_object_file) -I../websynth/llasm
 
 .PHONY: clean
 clean:

@@ -88,21 +88,21 @@ EXTERNC int D77_LoadLibrary(const char *libpath)
     library = load_library_32bit(libpath);
     if (library == NULL) return 0;
 
-    c_ValidateSettings_asm = find_symbol_32bit(library, "c_ValidateSettings_asm");
-    c_InitializeDataFile_asm = find_symbol_32bit(library, "c_InitializeDataFile_asm");
-    c_InitializeSynth_asm = find_symbol_32bit(library, "c_InitializeSynth_asm");
-    c_InitializeUnknown_asm = find_symbol_32bit(library, "c_InitializeUnknown_asm");
-    c_InitializeEffect_asm = find_symbol_32bit(library, "c_InitializeEffect_asm");
-    c_InitializeCpuLoad_asm = find_symbol_32bit(library, "c_InitializeCpuLoad_asm");
-    c_InitializeParameters_asm = find_symbol_32bit(library, "c_InitializeParameters_asm");
-    c_InitializeMasterVolume_asm = find_symbol_32bit(library, "c_InitializeMasterVolume_asm");
+    c_ValidateSettings_asm = (void (*)(CPU))find_symbol_32bit(library, "c_ValidateSettings_asm");
+    c_InitializeDataFile_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeDataFile_asm");
+    c_InitializeSynth_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeSynth_asm");
+    c_InitializeUnknown_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeUnknown_asm");
+    c_InitializeEffect_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeEffect_asm");
+    c_InitializeCpuLoad_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeCpuLoad_asm");
+    c_InitializeParameters_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeParameters_asm");
+    c_InitializeMasterVolume_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeMasterVolume_asm");
 
-    dwRenderedSamplesPerCall_asm = find_symbol_32bit(library, "dwRenderedSamplesPerCall_asm");
+    dwRenderedSamplesPerCall_asm = (uint32_t *)find_symbol_32bit(library, "dwRenderedSamplesPerCall_asm");
 
-    c_MidiMessageShort_asm = find_symbol_32bit(library, "c_MidiMessageShort_asm");
-    c_MidiMessageLong_asm = find_symbol_32bit(library, "c_MidiMessageLong_asm");
+    c_MidiMessageShort_asm = (void (*)(CPU))find_symbol_32bit(library, "c_MidiMessageShort_asm");
+    c_MidiMessageLong_asm = (void (*)(CPU))find_symbol_32bit(library, "c_MidiMessageLong_asm");
 
-    c_RenderSamples_asm = find_symbol_32bit(library, "c_RenderSamples_asm");
+    c_RenderSamples_asm = (void (*)(CPU))find_symbol_32bit(library, "c_RenderSamples_asm");
 
     if ((c_ValidateSettings_asm == NULL) ||
         (c_InitializeDataFile_asm == NULL) ||
@@ -164,7 +164,7 @@ EXTERNC void D77_ValidateSettings(void *lpSettings)
     cpu = x86_initialize_cpu();
 
     // __fastcall
-    ecx = (uintptr_t)lpSettings;
+    ecx = (uint32_t)(uintptr_t)lpSettings;
 
     c_ValidateSettings_asm(cpu);
 }
@@ -178,7 +178,7 @@ EXTERNC uint32_t D77_InitializeDataFile(uint8_t *lpDataFile, uint32_t dwLength)
     cpu = x86_initialize_cpu();
 
     // __fastcall
-    ecx = (uintptr_t)lpDataFile;
+    ecx = (uint32_t)(uintptr_t)lpDataFile;
     edx = dwLength;
 
     c_InitializeDataFile_asm(cpu);
@@ -259,7 +259,7 @@ EXTERNC void D77_InitializeParameters(const void *lpParameters)
     cpu = x86_initialize_cpu();
 
     // __fastcall
-    ecx = (uintptr_t)lpParameters;
+    ecx = (uint32_t)(uintptr_t)lpParameters;
 
     c_InitializeParameters_asm(cpu);
 }
@@ -318,7 +318,7 @@ EXTERNC uint32_t D77_MidiMessageLong(const uint8_t *lpMessage, uint32_t dwLength
     cpu = x86_initialize_cpu();
 
     // __fastcall
-    ecx = (uintptr_t)lpMessage;
+    ecx = (uint32_t)(uintptr_t)lpMessage;
     edx = dwLength;
 
     // MidiMessageLong_asm has a third (unused) parameter (uint8_t dwMidiPort)
@@ -340,7 +340,7 @@ EXTERNC uint32_t D77_RenderSamples(int16_t *lpSamples)
     cpu = x86_initialize_cpu();
 
     // __fastcall
-    ecx = (uintptr_t)lpSamples;
+    ecx = (uint32_t)(uintptr_t)lpSamples;
 
     c_RenderSamples_asm(cpu);
 

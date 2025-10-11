@@ -5,15 +5,27 @@ x86_main_source_file := ../websynth/x86/dswbsWDM.asm
 x86_main_include_files := ../websynth/x86/extern.inc ../websynth/x86/misc.inc ../websynth/x86/seg01.inc ../websynth/x86/seg02.inc ../websynth/x86/seg03.inc ../websynth/x86/seg05.inc ../websynth/x86/x86inc.inc
 x86_other_object_files := ../websynth/x86/CLIB-asm.o ../websynth/x86/functions-asm.o
 
-$(x86_main_object_file): $(x86_main_source_file) $(x86_main_include_files)
-	nasm $(x86_main_source_file) -fwin32 -Ox -i../websynth/x86/ -o$(x86_main_object_file)
+ifeq (x$(CC)y$(MSYSTEM)z, xccyCLANG64z)
+CC = clang
+else ifeq (x$(CC)y$(MSYSTEM)z, xccyCLANGARM64z)
+CC = clang
+else ifeq ($(CC), cc)
+CC = gcc
+endif
 
-$(x86_other_object_files): %.o: %.asm
-	nasm $^ -fwin32 -Ox -i../websynth/x86/ -o$@
+$(x86_main_object_file): $(x86_main_source_file) $(x86_main_include_files)
+
+.SUFFIXES: .asm .o
+.asm.o:
+	nasm $< -fwin32 -Ox -i../websynth/x86/ -o$@
 
 d77_pcmconvert.exe: d77_pcmconvert.c midi_loader.c midi_loader.h ../websynth/websynth.h $(x86_main_object_file) $(x86_other_object_files)
-	gcc -s -m32 -fno-PIE -O2 -Wall -o d77_pcmconvert.exe d77_pcmconvert.c midi_loader.c $(x86_main_object_file) $(x86_other_object_files) -I../websynth
+	$(CC) -s -m32 -fno-PIE -O2 -Wall -o d77_pcmconvert.exe d77_pcmconvert.c midi_loader.c $(x86_main_object_file) $(x86_other_object_files) -I../websynth
 
 .PHONY: clean
 clean:
+ifdef MSYSTEM
+	rm -f d77_pcmconvert.exe $(x86_main_object_file) $(x86_other_object_files)
+else
 	del d77_pcmconvert.exe $(subst /,\,$(x86_main_object_file)) $(subst /,\,$(x86_other_object_files))
+endif

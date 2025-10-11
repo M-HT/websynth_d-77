@@ -58,6 +58,14 @@
 
 #endif
 
+#if defined(__GNUC__)
+#define INLINE __inline__
+#elif defined(_MSC_VER)
+#define INLINE __inline
+#else
+#define INLINE inline
+#endif
+
 
 static const char *arg_input = NULL;
 static const char *arg_output = NULL;
@@ -92,13 +100,13 @@ static int16_t *output_buffer;
 static unsigned int frequency, bytes_per_call, samples_per_call;
 
 
-static inline void WRITE_LE_UINT16(uint8_t *ptr, uint16_t value)
+static INLINE void WRITE_LE_UINT16(uint8_t *ptr, uint16_t value)
 {
     ptr[0] = value & 0xff;
     ptr[1] = (value >> 8) & 0xff;
 }
 
-static inline void WRITE_LE_UINT32(uint8_t *ptr, uint32_t value)
+static INLINE void WRITE_LE_UINT32(uint8_t *ptr, uint32_t value)
 {
     ptr[0] = value & 0xff;
     ptr[1] = (value >> 8) & 0xff;
@@ -113,7 +121,11 @@ static uint8_t *load_data_file(const char *datapath, int *length)
     uint8_t *mem;
     long datalen;
 
+#if (defined(_MSC_VER) && __STDC_WANT_SECURE_LIB__) || (defined(__MINGW32__) && defined(_UCRT)) || (defined(__STDC_LIB_EXT1__) && __STDC_WANT_LIB_EXT1__)
+    if (fopen_s(&f, datapath, "rb"))
+#else
     f = fopen(datapath, "rb");
+#endif
     if (f == NULL)
     {
 #ifndef _WIN32
@@ -172,14 +184,18 @@ static uint8_t *load_data_file(const char *datapath, int *length)
             return NULL;
         }
 
+#if (defined(_MSC_VER) && __STDC_WANT_SECURE_LIB__) || (defined(__MINGW32__) && defined(_UCRT)) || (defined(__STDC_LIB_EXT1__) && __STDC_WANT_LIB_EXT1__)
+        if (fopen_s(&f, pathcopy, "rb"))
+#else
         f = fopen(pathcopy, "rb");
-
-        free(pathcopy);
-
         if (f == NULL)
+#endif
         {
+            free(pathcopy);
             return NULL;
         }
+
+        free(pathcopy);
 #else
         return NULL;
 #endif
@@ -216,7 +232,7 @@ static uint8_t *load_data_file(const char *datapath, int *length)
         return NULL;
     }
 
-    if (fread(mem, 1, datalen, f) != datalen)
+    if (fread(mem, 1, datalen, f) != (unsigned long)datalen)
     {
 #ifdef INDIRECT_64BIT
         D77_FreeMemory(mem, datalen);
@@ -632,8 +648,12 @@ int main(int argc, char *argv[])
             uint8_t wav_header[44];
             uint8_t *header_ptr;
 
+#if (defined(_MSC_VER) && __STDC_WANT_SECURE_LIB__) || (defined(__MINGW32__) && defined(_UCRT)) || (defined(__STDC_LIB_EXT1__) && __STDC_WANT_LIB_EXT1__)
+            if (fopen_s(&fout, arg_output, "wb"))
+#else
             fout = fopen(arg_output, "wb");
             if (fout == NULL)
+#endif
             {
                 free_midi_data(midi_events);
                 fprintf(stderr, "error opening output file\n");

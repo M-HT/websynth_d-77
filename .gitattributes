@@ -1,0 +1,5 @@
+*.sci linguist-language=Text
+*.llasm linguist-language=Text
+*.llinc linguist-language=Text
+*.inc linguist-language=Assembly
+documentation/* linguist-documentation

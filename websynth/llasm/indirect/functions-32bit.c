@@ -31,6 +31,12 @@
 #include <windows.h>
 #include <stdint.h>
 #include <stdio.h>
+#if !defined(IMAGE_SIZEOF_BASE_RELOCATION)
+#define IMAGE_SIZEOF_BASE_RELOCATION 8
+#endif
+#if !defined(IMAGE_SIZEOF_NT_OPTIONAL64_HEADER)
+#define IMAGE_SIZEOF_NT_OPTIONAL64_HEADER 240
+#endif
 #else
 #include <inttypes.h>
 #include <stdio.h>
@@ -40,6 +46,15 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <elf.h>
+#if !defined(MAP_FIXED_NOREPLACE) && defined(MAP_EXCL)
+#define MAP_FIXED_NOREPLACE (MAP_FIXED | MAP_EXCL)
+#endif
+#if !defined(R_X86_64_JUMP_SLOT) && defined(R_X86_64_JMP_SLOT)
+#define R_X86_64_JUMP_SLOT R_X86_64_JMP_SLOT
+#endif
+#if !defined(DT_NUM)
+#define DT_NUM 38
+#endif
 #endif
 
 #include "functions-32bit.h"
@@ -98,15 +113,22 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
     void *mem, *start;
     long page_size;
     FILE *f;
-    char str1[18], str2[18];
-    int num_matches;
+    int num_matches, prot, flags;
     uintmax_t num0, num1, num2;
 
     if (size == 0) return NULL;
 
+    prot = only_address_space ? PROT_NONE : (PROT_READ | PROT_WRITE);
+
+#if !defined(MAP_NORESERVE) && defined(MAP_GUARD)
+    flags = only_address_space ? MAP_GUARD : (MAP_PRIVATE | MAP_ANONYMOUS);
+#else
+    flags = MAP_PRIVATE | MAP_ANONYMOUS | (only_address_space ? MAP_NORESERVE : 0);
+#endif
+
     // if platform supports MAP_32BIT, then try mapping memory with it
 #if defined(MAP_32BIT) && (MAP_32BIT != 0)
-    mem = mmap(0, size, only_address_space ? PROT_NONE : (PROT_READ | PROT_WRITE), MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT | (only_address_space ? MAP_NORESERVE : 0), -1, 0);
+    mem = mmap(0, size, prot, MAP_32BIT | flags, -1, 0);
     if (mem != MAP_FAILED)
     {
         if (((uintptr_t)mem >= UINT64_C(0x80000000)) || (size + (uintptr_t)mem > UINT64_C(0x80000000)))
@@ -123,7 +145,13 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
 
     // look for unused memory below 2GB in memory maps and try mapping memory there
     f = fopen("/proc/self/maps", "rb");
-    if (f == NULL) return NULL;
+    if (f == NULL)
+    {
+        char mapname[32];
+        sprintf(mapname, "/proc/%"PRIuMAX"/map", (uintmax_t)getpid());
+        f = fopen(mapname, "rb");
+        if (f == NULL) return NULL;
+    }
 
     page_size = sysconf(_SC_PAGESIZE);
     if (page_size <= 0) page_size = 4096;
@@ -132,14 +160,8 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
     num0 = (1024*1024 + 65536 + (page_size - 1)) & ~(page_size - 1);
     while (num0 < UINT64_C(0x80000000))
     {
-        num_matches = fscanf(f, "%17[0-9a-fA-F]-%17[0-9a-fA-F] %*[^\n^\r]%*[\n\r]", str1, str2);
+        num_matches = fscanf(f, "%"SCNxMAX"%*[ -]%"SCNxMAX" %*[^\n^\r]%*[\n\r]", &num1, &num2);
         if ((num_matches == EOF) || (num_matches < 2)) break;
-
-        num1 = strtoumax(str1, NULL, 16);
-        if ((num1 == 0) || (num1 == UINTMAX_MAX)) break;
-
-        num2 = strtoumax(str2, NULL, 16);
-        if ((num2 == 0) || (num2 == UINTMAX_MAX)) break;
 
         // num1-num2 block is used
         // num0-num1 block is not used
@@ -155,7 +177,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
         {
             // try using memory at the start of the block
             start = (void *)num0;
-            mem = mmap(start, size, only_address_space ? PROT_NONE : (PROT_READ | PROT_WRITE), MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE | (only_address_space ? MAP_NORESERVE : 0), -1, 0);
+            mem = mmap(start, size, prot, MAP_FIXED_NOREPLACE | flags, -1, 0);
             if (mem == start) break;
             if (mem != MAP_FAILED)
             {
@@ -167,7 +189,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
             start = (void *)((num1 - size) & ~(page_size - 1));
             if (start != (void *)num0)
             {
-                mem = mmap(start, size, only_address_space ? PROT_NONE : (PROT_READ | PROT_WRITE), MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE | (only_address_space ? MAP_NORESERVE : 0), -1, 0);
+                mem = mmap(start, size, prot, MAP_FIXED_NOREPLACE | flags, -1, 0);
                 if (mem == start) break;
                 if (mem != MAP_FAILED)
                 {
@@ -193,7 +215,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
     {
         // try using memory after the end of the last block
         start = (void *)num0;
-        mem = mmap(start, size, only_address_space ? PROT_NONE : (PROT_READ | PROT_WRITE), MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE | (only_address_space ? MAP_NORESERVE : 0), -1, 0);
+        mem = mmap(start, size, prot, MAP_FIXED_NOREPLACE | flags, -1, 0);
         if (mem == start) return mem;
         if (mem != MAP_FAILED)
         {
@@ -205,7 +227,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
         start = (void *)((UINT64_C(0x80000000) - size) & ~(page_size - 1));
         if (start != (void *)num0)
         {
-            mem = mmap(start, size, only_address_space ? PROT_NONE : (PROT_READ | PROT_WRITE), MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE | (only_address_space ? MAP_NORESERVE : 0), -1, 0);
+            mem = mmap(start, size, prot, MAP_FIXED_NOREPLACE | flags, -1, 0);
             if (mem == start) return mem;
             if (mem != MAP_FAILED)
             {
@@ -347,7 +369,7 @@ static uint8_t *load_library_from_memory_windows(uint8_t *mem)
         VirtualProtect(mapped_addr, sizeof(IMAGE_NT_HEADERS64) + nt_headers->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER), PAGE_READONLY, &oldprot);
     }
 
-    return mapped_addr;
+    return (uint8_t *)mapped_addr;
 
 error1:
     VirtualFree(mapped_addr, 0, MEM_RELEASE);
@@ -479,7 +501,7 @@ static uint8_t *load_library_from_file_windows(HANDLE file)
 
     HeapFree(heap, 0, sec_headers);
 
-    return mapped_addr;
+    return (uint8_t *)mapped_addr;
 
 error2:
     VirtualFree(mapped_addr, 0, MEM_RELEASE);
@@ -611,7 +633,7 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
 
             if (program_header->p_flags & PF_X)
             {
-                __builtin___clear_cache(segment + page_offset, segment + page_offset + filesz);
+                __builtin___clear_cache((char *)(segment + page_offset), (char *)(segment + page_offset + filesz));
             }
         }
 
@@ -726,7 +748,7 @@ static uint8_t *load_library_from_memory_linux(int fd, uint8_t *mem, uint64_t *l
 
                 if (program_header->p_flags & PF_X)
                 {
-                    __builtin___clear_cache(segment + page_offset, segment + page_offset + filesz);
+                    __builtin___clear_cache((char *)(segment + page_offset), (char *)(segment + page_offset + filesz));
                 }
             }
 
@@ -760,7 +782,7 @@ void *load_library_32bit(const char *libpath)
     const char *dll_name, *import_name;
     uint64_t *import_lookup, *import_address;
     HANDLE process;
-    int index, indsymb;
+    unsigned int index, indsymb;
     uint32_t prot, reloc_offset1, reloc_offset2, reloc_type, page_offset;
     DWORD oldprot;
 
@@ -770,7 +792,7 @@ void *load_library_32bit(const char *libpath)
     file = CreateFile(libpath, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE) return NULL;
 
-    if (!GetFileSizeEx(file, &fsize) || fsize.QuadPart < sizeof(IMAGE_DOS_HEADER) + sizeof(IMAGE_NT_HEADERS64)) // error getting size or file is smaller than headers
+    if (!GetFileSizeEx(file, &fsize) || fsize.QuadPart < (LONGLONG)(sizeof(IMAGE_DOS_HEADER) + sizeof(IMAGE_NT_HEADERS64))) // error getting size or file is smaller than headers
     {
         CloseHandle(file);
         return NULL;
@@ -826,7 +848,7 @@ void *load_library_32bit(const char *libpath)
             page_offset = *(uint16_t *)((uintptr_t)base_reloc + reloc_offset2) & 0x0fff;
             if (reloc_type == IMAGE_REL_BASED_HIGHLOW)
             {
-                *(uint32_t *)(base_addr + base_reloc->VirtualAddress + page_offset) += (intptr_t)base_addr - nt_headers->OptionalHeader.ImageBase;
+                *(uint32_t *)(base_addr + base_reloc->VirtualAddress + page_offset) += (int32_t)((intptr_t)base_addr - nt_headers->OptionalHeader.ImageBase);
             }
             else if (reloc_type == IMAGE_REL_BASED_DIR64)
             {
@@ -858,7 +880,7 @@ void *load_library_32bit(const char *libpath)
             }
 
             dll_name = (const char *)(base_addr + import_desc->Name);
-            if (dll_name[0] != 0 && strcmp(dll_name, "(null)") != 0)
+            if (dll_name[0] != 0 && strcmp(dll_name, "(null)") != 0 && strcmp(dll_name, ".(null)") != 0)
             {
                 fprintf(stderr, "Error: unsuported DLL importing\n");
                 goto error1;
@@ -1121,13 +1143,13 @@ void *find_symbol_32bit(void *library, const char *name)
     uint8_t *base_addr;
     uint32_t *addresses, *names;
     uint16_t *nameordinals;
-    int index;
+    DWORD index;
 
     if (library == NULL || name == NULL || *name == 0) return NULL;
 
     nt_headers = (PIMAGE_NT_HEADERS64)library;
 
-    base_addr = library - nt_headers->OptionalHeader.DataDirectory[15].VirtualAddress;
+    base_addr = (uint8_t *)library - nt_headers->OptionalHeader.DataDirectory[15].VirtualAddress;
 
     if (nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size != 0)
     {
