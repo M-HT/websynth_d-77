@@ -34,12 +34,19 @@
 #define _WIN32
 #endif
 
-#ifndef _WIN32
+#ifdef _WIN32
+    #include <io.h>
+    #include <fcntl.h>
+#else
     #include <sys/types.h>
     #include <dirent.h>
 #endif
 
-#ifdef __BYTE_ORDER
+#if defined(_MSC_VER)
+
+#undef BIG_ENDIAN_BYTE_ORDER
+
+#elif defined(__BYTE_ORDER__)
 
 #if (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 #define BIG_ENDIAN_BYTE_ORDER
@@ -47,7 +54,7 @@
 #undef BIG_ENDIAN_BYTE_ORDER
 #endif
 
-#elif !defined(_WIN32)
+#else
 
 #include <endian.h>
 #if (__BYTE_ORDER == __BIG_ENDIAN)
@@ -694,6 +701,13 @@ int main(int argc, char *argv[])
         }
         else
         {
+#ifdef _WIN32
+            if (_setmode(_fileno(stdout), _O_BINARY) == -1)
+            {
+                fprintf(stderr, "error changing output mode to binary\n");
+                return 9;
+            }
+#endif
             fout = stdout;
         }
 
