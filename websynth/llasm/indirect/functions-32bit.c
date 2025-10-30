@@ -64,6 +64,28 @@
 // https://gist.github.com/x0nu11byt3/bcb35c3de461e5fb66173071a2379779
 
 
+#ifdef _WIN32
+static void *reserve_address_space(uintptr_t maddr, unsigned int size)
+{
+    void *mem;
+    MEMORY_BASIC_INFORMATION minfo;
+
+    if (0 == VirtualQuery((void *)maddr, &minfo, sizeof(minfo))) return NULL;
+
+    if (minfo.State == MEM_FREE)
+    {
+        if (minfo.RegionSize + (uintptr_t)minfo.BaseAddress >= maddr + size)
+        {
+            mem = VirtualAlloc((void *)maddr, size, MEM_RESERVE, PAGE_NOACCESS);
+            if (mem == (void *)maddr) return mem;
+            if (mem != NULL)VirtualFree(mem, 0, MEM_RELEASE);
+        }
+    }
+
+    return NULL;
+}
+#endif
+
 void *map_memory_32bit(unsigned int size, int only_address_space)
 {
 #ifdef _WIN32
@@ -86,7 +108,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
     maddr = (maddr + (sinfo.dwAllocationGranularity - 1)) & ~(sinfo.dwAllocationGranularity - 1);
 
     // look for unused memory below 2GB
-    while (maddr < UINT64_C(0x80000000))
+    while (maddr < UINT64_C(0x80000000) && maddr + size <= UINT64_C(0x80000000))
     {
         if (0 == VirtualQuery((void *)maddr, &minfo, sizeof(minfo))) return NULL;
 
@@ -283,7 +305,7 @@ static uint8_t *load_library_from_memory_windows(uint8_t *mem)
     nt_headers = (PIMAGE_NT_HEADERS64) (mem + dos_header->e_lfanew);
 
     if (nt_headers->Signature != IMAGE_NT_SIGNATURE ||
-        nt_headers->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
+        (nt_headers->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 && nt_headers->FileHeader.Machine != IMAGE_FILE_MACHINE_ARM64) ||
         nt_headers->FileHeader.NumberOfSections == 0 ||
         nt_headers->FileHeader.SizeOfOptionalHeader < IMAGE_SIZEOF_NT_OPTIONAL64_HEADER ||
         (nt_headers->FileHeader.Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE) == 0 ||
@@ -291,8 +313,7 @@ static uint8_t *load_library_from_memory_windows(uint8_t *mem)
         (nt_headers->FileHeader.Characteristics & IMAGE_FILE_RELOCS_STRIPPED) != 0 ||
         nt_headers->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
         nt_headers->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI ||
-        nt_headers->OptionalHeader.NumberOfRvaAndSizes < IMAGE_NUMBEROF_DIRECTORY_ENTRIES ||
-        nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size == 0
+        nt_headers->OptionalHeader.NumberOfRvaAndSizes < IMAGE_NUMBEROF_DIRECTORY_ENTRIES
        ) return NULL;
 
     GetSystemInfo(&sinfo);
@@ -329,7 +350,14 @@ static uint8_t *load_library_from_memory_windows(uint8_t *mem)
     // round up maximum address to page boundary
     max_addr = (max_addr + (sinfo.dwPageSize - 1)) & ~(sinfo.dwPageSize - 1);
 
-    mapped_addr = map_memory_32bit(max_addr - min_addr, 1);
+    if (nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size == 0)
+    {
+        mapped_addr = reserve_address_space(nt_headers->OptionalHeader.ImageBase + min_addr, max_addr - min_addr);
+    }
+    else
+    {
+        mapped_addr = map_memory_32bit(max_addr - min_addr, 1);
+    }
     if (mapped_addr == NULL) return NULL;
 
     base_addr = (uint8_t *)((uintptr_t)mapped_addr - min_addr);
@@ -402,7 +430,7 @@ static uint8_t *load_library_from_file_windows(HANDLE file)
     if (bytes_read != sizeof(IMAGE_NT_HEADERS64)) return NULL;
 
     if (nt_headers.Signature != IMAGE_NT_SIGNATURE ||
-        nt_headers.FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
+        (nt_headers.FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 && nt_headers.FileHeader.Machine != IMAGE_FILE_MACHINE_ARM64) ||
         nt_headers.FileHeader.NumberOfSections == 0 ||
         nt_headers.FileHeader.SizeOfOptionalHeader < IMAGE_SIZEOF_NT_OPTIONAL64_HEADER ||
         (nt_headers.FileHeader.Characteristics & IMAGE_FILE_EXECUTABLE_IMAGE) == 0 ||
@@ -410,8 +438,7 @@ static uint8_t *load_library_from_file_windows(HANDLE file)
         (nt_headers.FileHeader.Characteristics & IMAGE_FILE_RELOCS_STRIPPED) != 0 ||
         nt_headers.OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
         nt_headers.OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI ||
-        nt_headers.OptionalHeader.NumberOfRvaAndSizes < IMAGE_NUMBEROF_DIRECTORY_ENTRIES ||
-        nt_headers.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size == 0
+        nt_headers.OptionalHeader.NumberOfRvaAndSizes < IMAGE_NUMBEROF_DIRECTORY_ENTRIES
        ) return NULL;
 
     heap = GetProcessHeap();
@@ -456,7 +483,14 @@ static uint8_t *load_library_from_file_windows(HANDLE file)
     // round up maximum address to page boundary
     max_addr = (max_addr + (sinfo.dwPageSize - 1)) & ~(sinfo.dwPageSize - 1);
 
-    mapped_addr = map_memory_32bit(max_addr - min_addr, 1);
+    if (nt_headers.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size == 0)
+    {
+        mapped_addr = reserve_address_space(nt_headers.OptionalHeader.ImageBase + min_addr, max_addr - min_addr);
+    }
+    else
+    {
+        mapped_addr = map_memory_32bit(max_addr - min_addr, 1);
+    }
     if (mapped_addr == NULL) goto error1;
 
     base_addr = (uint8_t *)((uintptr_t)mapped_addr - min_addr);
