@@ -1,0 +1,12 @@
+c_ValidateSettings
+c_InitializeDataFile
+c_InitializeSynth
+c_InitializeUnknown
+c_InitializeEffect
+c_InitializeCpuLoad
+c_InitializeParameters
+c_InitializeMasterVolume
+c_MidiMessageShort
+c_MidiMessageLong
+c_RenderSamples
+dwRenderedSamplesPerCall_asm

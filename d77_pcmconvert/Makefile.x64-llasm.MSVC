@@ -13,10 +13,10 @@ llasm_import_def_file = ..\websynth\llasm\indirect\d77_import.def
 llasm_lib_def_file = ..\websynth\llasm\indirect\d77_lib.def
 
 $(llasm_object_file): $(llasm_source_file) $(llasm_include_files)
-	llasm $(llasm_source_file) -O -m64 -inline-float | opt -O3 | llc -O=3 -filetype=obj -mtriple=arm64-pc-windows-msvc > $(llasm_object_file)
+	llasm $(llasm_source_file) -O -m64 -inline-float | opt -O3 | llc -O=3 -filetype=obj -mtriple=x86_64-unknown-windows-gnu > $(llasm_object_file)
 
 $(llasm_import_file): $(llasm_import_def_file)
-	lib /NOLOGO /OUT:$(llasm_import_file) /DEF:$(llasm_import_def_file) /NAME:.(null) /MACHINE:ARM64
+	lib /NOLOGO /OUT:$(llasm_import_file) /DEF:$(llasm_import_def_file) /NAME:.(null) /MACHINE:X64
 
 d77_pcmconvert.exe: d77_pcmconvert.c midi_loader.c midi_loader.h ..\websynth\websynth.h $(llasm_indirect_c_files) $(llasm_indirect_h_files)
 	cl /O2 /W3 /nologo /DINDIRECT_64BIT /Fed77_pcmconvert.exe d77_pcmconvert.c midi_loader.c $(llasm_indirect_c_files) /I..\websynth /I..\websynth\llasm /I..\websynth\indirect

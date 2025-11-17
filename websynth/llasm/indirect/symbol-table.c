@@ -22,6 +22,9 @@
  *
  */
 
+#include <stdint.h>
+#include <stddef.h>
+
 extern uint8_t x87_fild_int64;
 extern uint8_t x87_fist_int32;
 extern uint8_t x87_fistp_int16;
@@ -66,11 +69,11 @@ extern uint8_t x87_fucom_st;
 extern uint8_t x87_fucomp_st;
 extern uint8_t x87_fxch_st;
 
-const static struct
+const struct
 {
     const char *name;
     uint8_t *value;
-} symbol_table[] = {
+} symbol_table_32bit[] = {
     {"x87_fild_int64", &x87_fild_int64},
     {"x87_fist_int32", &x87_fist_int32},
     {"x87_fistp_int16", &x87_fistp_int16},
@@ -114,5 +117,6 @@ const static struct
     {"x87_fucom_st", &x87_fucom_st},
     {"x87_fucomp_st", &x87_fucomp_st},
     {"x87_fxch_st", &x87_fxch_st},
+    {NULL, NULL},
 };
 

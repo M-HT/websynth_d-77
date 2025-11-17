@@ -1,0 +1,40 @@
+all: d77_pcmconvert.exe d77_lib.dll
+
+llasm_lib_c_files := ../websynth/llasm/asm-cpu-var.c ../websynth/llasm/llasm_movs.c ../websynth/llasm/llasm_pushx.c ../websynth/llasm/llasm_stos.c
+llasm_lib_h_files := ../websynth/llasm/llasm_cpu.h
+llasm_indirect_c_files := ../websynth/llasm/asm-cpu.c ../websynth/llasm/functions-llasm.c ../websynth/llasm/llasm_float.c ../websynth/indirect/functions-32bit.c ../websynth/llasm/indirect/symbol-table.c
+llasm_indirect_h_files := ../websynth/llasm/llasm_cpu.h  ../websynth/indirect/functions-32bit.h
+llasm_object_file := ../websynth/llasm/dswbsWDM.o
+llasm_source_file := ../websynth/llasm/dswbsWDM.llasm
+llasm_include_files := ../websynth/llasm/extern.llinc ../websynth/llasm/llasm.llinc ../websynth/llasm/llasm_float.llinc ../websynth/llasm/llasm_movs.llinc ../websynth/llasm/llasm_pushx.llinc ../websynth/llasm/llasm_stos.llinc ../websynth/llasm/macros.llinc ../websynth/llasm/seg01_code.llinc ../websynth/llasm/seg01_data.llinc ../websynth/llasm/seg02_data.llinc ../websynth/llasm/seg03_data.llinc ../websynth/llasm/seg05_data.llinc
+llasm_import_file := ../websynth/llasm/indirect/d77_import.a
+llasm_import_def_file := ../websynth/llasm/indirect/d77_import.def
+llasm_lib_def_file := ../websynth/llasm/indirect/d77_lib.def
+
+ifeq (x$(CC)y$(MSYSTEM)z, xccyCLANG64z)
+CC = clang
+else ifeq (x$(CC)y$(MSYSTEM)z, xccyCLANGARM64z)
+CC = clang
+else ifeq ($(CC), cc)
+CC = gcc
+endif
+
+$(llasm_object_file): $(llasm_source_file) $(llasm_include_files)
+	llasm $(llasm_source_file) -O -m64 -inline-float | opt -O3 | llc -O=3 -filetype=obj -mtriple=x86_64-unknown-windows-gnu > $(llasm_object_file)
+
+$(llasm_import_file): $(llasm_import_def_file)
+	dlltool -k -l $(llasm_import_file) -D ".(null)" -d $(llasm_import_def_file)
+
+d77_pcmconvert.exe: d77_pcmconvert.c midi_loader.c midi_loader.h ../websynth/websynth.h $(llasm_indirect_c_files) $(llasm_indirect_h_files)
+	$(CC) -s -m64 -O2 -Wall -DINDIRECT_64BIT -o d77_pcmconvert.exe d77_pcmconvert.c midi_loader.c $(llasm_indirect_c_files) -I../websynth -I../websynth/llasm -I../websynth/indirect -lm
+
+d77_lib.dll: $(llasm_lib_c_files) $(llasm_lib_h_files) $(llasm_object_file) $(llasm_import_file) $(llasm_lib_def_file)
+	$(CC) -s -nostdlib -m64 -fno-PIE -O2 -Wall -fvisibility=hidden -fno-ident -shared -o d77_lib.dll $(llasm_lib_c_files) $(llasm_object_file) $(llasm_import_file) $(llasm_lib_def_file) -I../websynth/llasm -Wl,--entry= -Wl,--image-base=0x10000000
+
+.PHONY: clean
+clean:
+ifdef MSYSTEM
+	rm -f d77_pcmconvert.exe d77_lib.dll $(llasm_object_file) $(llasm_import_file)
+else
+	del d77_pcmconvert.exe d77_lib.dll $(subst /,\,$(llasm_object_file)) $(subst /,\,$(llasm_import_file))
+endif

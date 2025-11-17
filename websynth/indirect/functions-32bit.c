@@ -58,15 +58,20 @@
 #endif
 
 #include "functions-32bit.h"
-#include "symbol-table.h"
+
+extern const struct
+{
+    const char *name;
+    uint8_t *value;
+} symbol_table_32bit[];
 
 // ELF Format Cheatsheet:
 // https://gist.github.com/x0nu11byt3/bcb35c3de461e5fb66173071a2379779
 
 
-#ifdef _WIN32
 static void *reserve_address_space(uintptr_t maddr, unsigned int size)
 {
+#ifdef _WIN32
     void *mem;
     MEMORY_BASIC_INFORMATION minfo;
 
@@ -78,13 +83,28 @@ static void *reserve_address_space(uintptr_t maddr, unsigned int size)
         {
             mem = VirtualAlloc((void *)maddr, size, MEM_RESERVE, PAGE_NOACCESS);
             if (mem == (void *)maddr) return mem;
-            if (mem != NULL)VirtualFree(mem, 0, MEM_RELEASE);
+            if (mem != NULL) VirtualFree(mem, 0, MEM_RELEASE);
         }
     }
 
     return NULL;
-}
+#else
+    void *mem;
+    int flags;
+
+#if !defined(MAP_NORESERVE) && defined(MAP_GUARD)
+    flags = MAP_GUARD;
+#else
+    flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
 #endif
+
+    mem = mmap((void *)maddr, size, PROT_NONE, MAP_FIXED_NOREPLACE | flags, -1, 0);
+    if (mem == (void *)maddr) return mem;
+    if (mem != MAP_FAILED) munmap(mem, size);
+
+    return NULL;
+#endif
+}
 
 void *map_memory_32bit(unsigned int size, int only_address_space)
 {
@@ -576,7 +596,7 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
     Elf64_Phdr *program_header;
     uint8_t *base_addr, *start, *segment;
     int64_t page_size;
-    uint64_t min_addr, max_addr, length, page_offset, filesz;
+    uint64_t min_addr, max_addr, image_base, length, page_offset, filesz;
     int index, prot;
 
     if (lseek(fd, 0, SEEK_SET) < 0) goto error1;
@@ -589,7 +609,7 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
         (elf_header.e_ident[EI_MAG3] != ELFMAG3) ||
         (elf_header.e_ident[EI_CLASS] != ELFCLASS64) ||
         (elf_header.e_ident[EI_VERSION] != EV_CURRENT) ||
-        (elf_header.e_type != ET_DYN) ||
+        ((elf_header.e_type != ET_DYN) && (elf_header.e_type != ET_EXEC)) ||
         (elf_header.e_phentsize == 0) ||
         (elf_header.e_phnum == 0)
        ) goto error1;
@@ -606,7 +626,7 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
     if (page_size <= 0) page_size = 4096;
 
     // get minimum and maximum address for loading
-    max_addr = 0;
+    max_addr = image_base = 0;
     min_addr = (int64_t)-1;
     for (index = 0; index < elf_header.e_phnum; index++)
     {
@@ -622,20 +642,97 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
         {
             max_addr = program_header->p_vaddr + program_header->p_memsz;
         }
+        if (program_header->p_offset == 0)
+        {
+            image_base = program_header->p_vaddr;
+        }
     }
 
     // align minimum and maximum address to page size
     min_addr = min_addr & ~(page_size - 1);
     max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
 
-    if (min_addr != 0)
+    if (elf_header.e_type == ET_EXEC)
     {
-        fprintf(stderr, "Error: headers not loaded\n");
-        goto error2;
-    }
+        uint8_t *section_headers;
+        Elf64_Shdr *section_header;
+        uint64_t sym_offset, sym_size, sym_entsize, str_offset, str_size, orig_max_addr;
 
-    base_addr = (uint8_t *) map_memory_32bit(max_addr, 1);
-    if (base_addr == NULL) goto error2;
+        if (image_base == 0 || min_addr != image_base)
+        {
+            fprintf(stderr, "Error: headers not loaded\n");
+            goto error2;
+        }
+
+        if (lseek(fd, elf_header.e_shoff, SEEK_SET) < 0) goto error2;
+
+        section_headers = (uint8_t *)malloc(elf_header.e_shentsize * elf_header.e_shnum);
+        if (section_headers == NULL) goto error2;
+
+        if (read2(fd, section_headers, elf_header.e_shentsize * elf_header.e_shnum) != elf_header.e_shentsize * elf_header.e_shnum)
+        {
+            free(section_headers);
+            goto error2;
+        }
+
+        // find symbol and string tables in section headers
+        sym_offset = sym_size = sym_entsize = str_offset = str_size = 0;
+        for (index = 0; index < elf_header.e_shnum; index++)
+        {
+            section_header = (Elf64_Shdr *)(section_headers + index * elf_header.e_shentsize);
+
+            if (section_header->sh_type == SHT_SYMTAB)
+            {
+                sym_offset = section_header->sh_offset;
+                sym_size = section_header->sh_size;
+                sym_entsize = section_header->sh_entsize;
+            }
+            else if (section_header->sh_type == SHT_STRTAB && index != elf_header.e_shstrndx)
+            {
+                str_offset = section_header->sh_offset;
+                str_size = section_header->sh_size;
+            }
+        }
+
+        free(section_headers);
+
+        if (sym_offset == 0 || str_offset == 0) goto error2;
+
+        orig_max_addr = max_addr;
+        max_addr += 4 * sizeof(uint64_t) + sym_size + str_size;
+        max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+
+        base_addr = (uint8_t *) reserve_address_space(min_addr, max_addr - min_addr);
+        if (base_addr == NULL) goto error2;
+
+        // copy symbol and string tables into memory
+        segment = (uint8_t *)mmap((void *)orig_max_addr, max_addr - orig_max_addr, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+        if (segment == MAP_FAILED) goto error3;
+
+        ((uint64_t *)segment)[0] = orig_max_addr + 4 * sizeof(uint64_t);
+        ((uint64_t *)segment)[1] = sym_entsize;
+        ((uint64_t *)segment)[2] = orig_max_addr + 4 * sizeof(uint64_t) + sym_size;
+        ((uint64_t *)segment)[3] = str_size;
+
+        if (lseek(fd, sym_offset, SEEK_SET) < 0) goto error3;
+        if (read2(fd, segment + 4 * sizeof(uint64_t), sym_size) != sym_size) goto error3;
+
+        if (lseek(fd, str_offset, SEEK_SET) < 0) goto error3;
+        if (read2(fd, segment + 4 * sizeof(uint64_t) + sym_size, str_size) != str_size) goto error3;
+
+        if (mprotect(segment, max_addr - orig_max_addr, PROT_READ) < 0) goto error3;
+    }
+    else
+    {
+        if (min_addr != 0)
+        {
+            fprintf(stderr, "Error: headers not loaded\n");
+            goto error2;
+        }
+
+        base_addr = (uint8_t *) map_memory_32bit(max_addr, 1);
+        if (base_addr == NULL) goto error2;
+    }
 
     // load segments into memory
     for (index = 0; index < elf_header.e_phnum; index++)
@@ -645,7 +742,7 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
         if (program_header->p_type != PT_LOAD) continue;
 
         page_offset = program_header->p_vaddr & (page_size - 1);
-        start = base_addr + program_header->p_vaddr - page_offset;
+        start = base_addr + (program_header->p_vaddr - min_addr) - page_offset;
         length = (page_offset + program_header->p_memsz + (page_size - 1)) & ~(page_size - 1);
 
         prot = PROT_NONE;
@@ -695,7 +792,7 @@ static uint8_t *load_library_from_memory_linux(int fd, uint8_t *mem, uint64_t *l
     Elf64_Phdr *program_header;
     uint8_t *base_addr, *start, *segment;
     int64_t page_size;
-    uint64_t min_addr, max_addr, length, page_offset, filesz;
+    uint64_t min_addr, max_addr, image_base, length, page_offset, filesz;
     int index, prot;
 
     elf_header = (Elf64_Ehdr *)mem;
@@ -706,7 +803,7 @@ static uint8_t *load_library_from_memory_linux(int fd, uint8_t *mem, uint64_t *l
         (elf_header->e_ident[EI_MAG3] != ELFMAG3) ||
         (elf_header->e_ident[EI_CLASS] != ELFCLASS64) ||
         (elf_header->e_ident[EI_VERSION] != EV_CURRENT) ||
-        (elf_header->e_type != ET_DYN) ||
+        ((elf_header->e_type != ET_DYN) && (elf_header->e_type != ET_EXEC)) ||
         (elf_header->e_phentsize == 0) ||
         (elf_header->e_phnum == 0)
        ) goto error1;
@@ -716,7 +813,7 @@ static uint8_t *load_library_from_memory_linux(int fd, uint8_t *mem, uint64_t *l
     if (page_size <= 0) page_size = 4096;
 
     // get minimum and maximum address for loading
-    max_addr = 0;
+    max_addr = image_base = 0;
     min_addr = (int64_t)-1;
     for (index = 0; index < elf_header->e_phnum; index++)
     {
@@ -732,20 +829,79 @@ static uint8_t *load_library_from_memory_linux(int fd, uint8_t *mem, uint64_t *l
         {
             max_addr = program_header->p_vaddr + program_header->p_memsz;
         }
+        if (program_header->p_offset == 0)
+        {
+            image_base = program_header->p_vaddr;
+        }
     }
 
     // align minimum and maximum address to page size
     min_addr = min_addr & ~(page_size - 1);
     max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
 
-    if (min_addr != 0)
+    if (elf_header->e_type == ET_EXEC)
     {
-        fprintf(stderr, "Error: headers not loaded\n");
-        goto error1;
-    }
+        Elf64_Shdr *section_header;
+        uint64_t sym_offset, sym_size, sym_entsize, str_offset, str_size, orig_max_addr;
 
-    base_addr = (uint8_t *) map_memory_32bit(max_addr, 1);
-    if (base_addr == NULL) goto error1;
+        if (image_base == 0 || min_addr != image_base)
+        {
+            fprintf(stderr, "Error: headers not loaded\n");
+            goto error1;
+        }
+
+        // find symbol and string tables in section headers
+        sym_offset = sym_size = sym_entsize = str_offset = str_size = 0;
+        for (index = 0; index < elf_header->e_shnum; index++)
+        {
+            section_header = (Elf64_Shdr *)(mem + elf_header->e_shoff + index * elf_header->e_shentsize);
+
+            if (section_header->sh_type == SHT_SYMTAB)
+            {
+                sym_offset = section_header->sh_offset;
+                sym_size = section_header->sh_size;
+                sym_entsize = section_header->sh_entsize;
+            }
+            else if (section_header->sh_type == SHT_STRTAB && index != elf_header->e_shstrndx)
+            {
+                str_offset = section_header->sh_offset;
+                str_size = section_header->sh_size;
+            }
+        }
+
+        if (sym_offset == 0 || str_offset == 0) goto error1;
+
+        orig_max_addr = max_addr;
+        max_addr += 4 * sizeof(uint64_t) + sym_size + str_size;
+        max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+
+        base_addr = (uint8_t *) reserve_address_space(min_addr, max_addr - min_addr);
+        if (base_addr == NULL) goto error1;
+
+        // copy symbol and string tables into memory
+        segment = (uint8_t *)mmap((void *)orig_max_addr, max_addr - orig_max_addr, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+        if (segment == MAP_FAILED) goto error2;
+
+        ((uint64_t *)segment)[0] = orig_max_addr + 4 * sizeof(uint64_t);
+        ((uint64_t *)segment)[1] = sym_entsize;
+        ((uint64_t *)segment)[2] = orig_max_addr + 4 * sizeof(uint64_t) + sym_size;
+        ((uint64_t *)segment)[3] = str_size;
+        memcpy(segment + 4 * sizeof(uint64_t), mem + sym_offset, sym_size);
+        memcpy(segment + 4 * sizeof(uint64_t) + sym_size, mem + str_offset, str_size);
+
+        if (mprotect(segment, max_addr - orig_max_addr, PROT_READ) < 0) goto error2;
+    }
+    else
+    {
+        if (min_addr != 0)
+        {
+            fprintf(stderr, "Error: headers not loaded\n");
+            goto error1;
+        }
+
+        base_addr = (uint8_t *) map_memory_32bit(max_addr, 1);
+        if (base_addr == NULL) goto error1;
+    }
 
     // map segments into memory
     for (index = 0; index < elf_header->e_phnum; index++)
@@ -755,7 +911,7 @@ static uint8_t *load_library_from_memory_linux(int fd, uint8_t *mem, uint64_t *l
         if (program_header->p_type != PT_LOAD) continue;
 
         page_offset = program_header->p_vaddr & (page_size - 1);
-        start = base_addr + program_header->p_vaddr - page_offset;
+        start = base_addr + (program_header->p_vaddr - min_addr) - page_offset;
         length = (page_offset + program_header->p_memsz + (page_size - 1)) & ~(page_size - 1);
 
         prot = PROT_NONE;
@@ -934,11 +1090,11 @@ void *load_library_32bit(const char *libpath)
                 import_name = (const char *)((PIMAGE_IMPORT_BY_NAME)(base_addr + (*import_lookup & 0x7fffffff)))->Name;
 
                 import_value = NULL;
-                for (indsymb = 0; indsymb < sizeof(symbol_table)/sizeof(symbol_table[0]); indsymb++)
+                for (indsymb = 0; symbol_table_32bit[indsymb].name != NULL; indsymb++)
                 {
-                    if (0 == strcmp(import_name, symbol_table[indsymb].name))
+                    if (0 == strcmp(import_name, symbol_table_32bit[indsymb].name))
                     {
-                        import_value = symbol_table[indsymb].value;
+                        import_value = symbol_table_32bit[indsymb].value;
                         break;
                     }
                 }
@@ -982,6 +1138,11 @@ void *load_library_32bit(const char *libpath)
         {
             if (!VirtualProtect(base_addr + sec_headers[index].VirtualAddress, sec_headers[index].Misc.VirtualSize, prot, &oldprot)) goto error1;
         }
+    }
+
+    if (nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size != 0)
+    {
+        RtlAddFunctionTable((PRUNTIME_FUNCTION)(base_addr + nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress), nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size / sizeof(RUNTIME_FUNCTION), (uintptr_t)base_addr);
     }
 
     return library;
@@ -1106,11 +1267,11 @@ error1:
                         symbname = (const char *)(library + dynamic_entries[DT_STRTAB] + symbol->st_name);
 
                         symbvalue = NULL;
-                        for (indsymb = 0; indsymb < sizeof(symbol_table)/sizeof(symbol_table[0]); indsymb++)
+                        for (indsymb = 0; symbol_table_32bit[indsymb].name != NULL; indsymb++)
                         {
-                            if (0 == strcmp(symbname, symbol_table[indsymb].name))
+                            if (0 == strcmp(symbname, symbol_table_32bit[indsymb].name))
                             {
-                                symbvalue = symbol_table[indsymb].value;
+                                symbvalue = symbol_table_32bit[indsymb].value;
                                 break;
                             }
                         }
@@ -1217,50 +1378,103 @@ void *find_symbol_32bit(void *library, const char *name)
 
     elf_header = (Elf64_Ehdr *)library;
 
-    // read dynamic entries
-    strtab = symtab = strsz = syment = 0;
-    for (index = 0; index < elf_header->e_phnum; index++)
+    if (elf_header->e_type == ET_EXEC)
     {
-        program_header = (Elf64_Phdr *)(library + elf_header->e_phoff + index * elf_header->e_phentsize);
+        int64_t page_size;
+        uint64_t max_addr;
 
-        if (program_header->p_type != PT_DYNAMIC) continue;
+        // get page size
+        page_size = sysconf(_SC_PAGESIZE);
+        if (page_size <= 0) page_size = 4096;
 
-        for (section_offset = 0; section_offset < program_header->p_memsz; section_offset += sizeof(Elf64_Dyn))
+        // get maximum address
+        max_addr = 0;
+        for (index = 0; index < elf_header->e_phnum; index++)
         {
-            dynamic_entry = (Elf64_Dyn *)(library + program_header->p_vaddr + section_offset);
+            program_header = (Elf64_Phdr *)(elf_header->e_phoff + index * elf_header->e_phentsize + (uintptr_t)library);
 
-            switch (dynamic_entry->d_tag)
+            if (program_header->p_type != PT_LOAD) continue;
+
+            if (program_header->p_vaddr + program_header->p_memsz > max_addr)
             {
-                case DT_STRTAB:
-                    strtab = dynamic_entry->d_un.d_val;
-                    break;
-                case DT_SYMTAB:
-                    symtab = dynamic_entry->d_un.d_val;
-                    break;
-                case DT_STRSZ:
-                    strsz = dynamic_entry->d_un.d_val;
-                    break;
-                case DT_SYMENT:
-                    syment = dynamic_entry->d_un.d_val;
-                    break;
+                max_addr = program_header->p_vaddr + program_header->p_memsz;
+            }
+        }
+
+        // align maximum address to page size
+        max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+
+        symtab = ((uint64_t *)max_addr)[0];
+        syment = ((uint64_t *)max_addr)[1];
+        strtab = ((uint64_t *)max_addr)[2];
+        strsz = ((uint64_t *)max_addr)[3];
+
+        for (section_offset = 0; 1; section_offset += syment)
+        {
+            symbol = (Elf64_Sym *)(symtab + section_offset);
+            if (symbol->st_name >= strsz) break;
+
+            if (symbol->st_value == 0) continue;
+
+            if (ELF64_ST_BIND(symbol->st_info) != STB_GLOBAL) continue;
+
+            symbname = (const char *)(strtab + symbol->st_name);
+
+            if (0 == strcmp(name, symbname))
+            {
+                return (void *)symbol->st_value;
             }
         }
     }
-
-    if (strtab == 0 || symtab == 0 || strsz == 0 || syment == 0) return NULL;
-
-    for (section_offset = 0; 1; section_offset += syment)
+    else if (elf_header->e_type == ET_DYN)
     {
-        symbol = (Elf64_Sym *)(library + symtab + section_offset);
-        if (symbol->st_name >= strsz) break;
-
-        if (symbol->st_value == 0) continue;
-
-        symbname = (const char *)(library + strtab + symbol->st_name);
-
-        if (0 == strcmp(name, symbname))
+        // read dynamic entries
+        strtab = symtab = strsz = syment = 0;
+        for (index = 0; index < elf_header->e_phnum; index++)
         {
-            return library + symbol->st_value;
+            program_header = (Elf64_Phdr *)(elf_header->e_phoff + index * elf_header->e_phentsize + (uintptr_t)library);
+
+            if (program_header->p_type != PT_DYNAMIC) continue;
+
+            for (section_offset = 0; section_offset < program_header->p_memsz; section_offset += sizeof(Elf64_Dyn))
+            {
+                dynamic_entry = (Elf64_Dyn *)(program_header->p_vaddr + section_offset + (uintptr_t)library);
+
+                switch (dynamic_entry->d_tag)
+                {
+                    case DT_STRTAB:
+                        strtab = dynamic_entry->d_un.d_val;
+                        break;
+                    case DT_SYMTAB:
+                        symtab = dynamic_entry->d_un.d_val;
+                        break;
+                    case DT_STRSZ:
+                        strsz = dynamic_entry->d_un.d_val;
+                        break;
+                    case DT_SYMENT:
+                        syment = dynamic_entry->d_un.d_val;
+                        break;
+                }
+            }
+        }
+
+        if (strtab == 0 || symtab == 0 || strsz == 0 || syment == 0) return NULL;
+
+        for (section_offset = 0; 1; section_offset += syment)
+        {
+            symbol = (Elf64_Sym *)(symtab + section_offset + (uintptr_t)library);
+            if (symbol->st_name >= strsz) break;
+
+            if (symbol->st_value == 0) continue;
+
+            if (ELF64_ST_BIND(symbol->st_info) != STB_GLOBAL) continue;
+
+            symbname = (const char *)(strtab + symbol->st_name + (uintptr_t)library);
+
+            if (0 == strcmp(name, symbname))
+            {
+                return (void *)(symbol->st_value + (uintptr_t)library);
+            }
         }
     }
 
@@ -1271,7 +1485,19 @@ void *find_symbol_32bit(void *library, const char *name)
 void unload_library_32bit(void *library)
 {
 #ifdef _WIN32
+    PIMAGE_NT_HEADERS64 nt_headers;
+    uint8_t *base_addr;
+
     if (library == NULL) return;
+
+    nt_headers = (PIMAGE_NT_HEADERS64)library;
+
+    base_addr = (uint8_t *)library - nt_headers->OptionalHeader.DataDirectory[15].VirtualAddress;
+
+    if (nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size != 0)
+    {
+        RtlDeleteFunctionTable((PRUNTIME_FUNCTION)(base_addr + nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress));
+    }
 
     VirtualFree(library, 0, MEM_RELEASE);
 #else
@@ -1279,7 +1505,7 @@ void unload_library_32bit(void *library)
     Elf64_Phdr *program_header;
     Elf64_Dyn *dynamic_entry;
     int64_t page_size;
-    uint64_t section_offset, fini, fini_array, fini_arraysz, max_addr;
+    uint64_t section_offset, fini, fini_array, fini_arraysz, min_addr, max_addr;
     int index;
 
     if (library == NULL) return;
@@ -1292,27 +1518,30 @@ void unload_library_32bit(void *library)
 
     // read dynamic entries
     fini = fini_array = fini_arraysz = 0;
-    for (index = 0; index < elf_header->e_phnum; index++)
+    if (elf_header->e_type == ET_DYN)
     {
-        program_header = (Elf64_Phdr *)(library + elf_header->e_phoff + index * elf_header->e_phentsize);
-
-        if (program_header->p_type != PT_DYNAMIC) continue;
-
-        for (section_offset = 0; section_offset < program_header->p_memsz; section_offset += sizeof(Elf64_Dyn))
+        for (index = 0; index < elf_header->e_phnum; index++)
         {
-            dynamic_entry = (Elf64_Dyn *)(library + program_header->p_vaddr + section_offset);
+            program_header = (Elf64_Phdr *)(elf_header->e_phoff + index * elf_header->e_phentsize + (uintptr_t)library);
 
-            switch (dynamic_entry->d_tag)
+            if (program_header->p_type != PT_DYNAMIC) continue;
+
+            for (section_offset = 0; section_offset < program_header->p_memsz; section_offset += sizeof(Elf64_Dyn))
             {
-                case DT_FINI:
-                    fini = dynamic_entry->d_un.d_val;
-                    break;
-                case DT_FINI_ARRAY:
-                    fini_array = dynamic_entry->d_un.d_val;
-                    break;
-                case DT_FINI_ARRAYSZ:
-                    fini_arraysz = dynamic_entry->d_un.d_val;
-                    break;
+                dynamic_entry = (Elf64_Dyn *)(program_header->p_vaddr + section_offset + (uintptr_t)library);
+
+                switch (dynamic_entry->d_tag)
+                {
+                    case DT_FINI:
+                        fini = dynamic_entry->d_un.d_val;
+                        break;
+                    case DT_FINI_ARRAY:
+                        fini_array = dynamic_entry->d_un.d_val;
+                        break;
+                    case DT_FINI_ARRAYSZ:
+                        fini_arraysz = dynamic_entry->d_un.d_val;
+                        break;
+                }
             }
         }
     }
@@ -1321,35 +1550,52 @@ void unload_library_32bit(void *library)
     if (fini != 0)
     {
         // run destructor
-        ((void (*)(void)) (library + fini))();
+        ((void (*)(void)) (fini + (uintptr_t)library))();
     }
     if (fini_arraysz != 0 && fini_array != 0)
     {
         for (section_offset = 0; section_offset < fini_arraysz; section_offset += sizeof(uint64_t))
         {
             // run destructor
-            ((void (*)(void))*(uint64_t *)(library + fini_array + section_offset) )();
+            ((void (*)(void))*(uint64_t *)(fini_array + section_offset + (uintptr_t)library) )();
         }
     }
 
-    // get maximum address for unloading
+    // get minimum and maximum address for unloading
     max_addr = 0;
+    min_addr = (int64_t)-1;
     for (index = 0; index < elf_header->e_phnum; index++)
     {
         program_header = (Elf64_Phdr *)(elf_header->e_phoff + index * elf_header->e_phentsize + (uintptr_t)library);
 
         if (program_header->p_type != PT_LOAD) continue;
 
+        if (program_header->p_vaddr < min_addr)
+        {
+            min_addr = program_header->p_vaddr;
+        }
         if (program_header->p_vaddr + program_header->p_memsz > max_addr)
         {
             max_addr = program_header->p_vaddr + program_header->p_memsz;
         }
     }
 
-    // align maximum address to page size
+    // align minimum and maximum address to page size
+    min_addr = min_addr & ~(page_size - 1);
     max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
 
-    munmap(library, max_addr);
+    if (elf_header->e_type == ET_EXEC)
+    {
+        uint64_t strtab, strsz;
+
+        strtab = ((uint64_t *)max_addr)[2];
+        strsz = ((uint64_t *)max_addr)[3];
+
+        max_addr = strtab + strsz;
+        max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+    }
+
+    munmap(library, max_addr - min_addr);
 #endif
 }
 

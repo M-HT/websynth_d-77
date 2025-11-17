@@ -13,19 +13,19 @@ The source code is released with [MIT license](https://spdx.org/licenses/MIT.htm
 The projects consists of following parts:
 
 * **websynth**
-  * Disassembled (**x86**) / statically recompiled (**llasm**) version of WebSynth D-77 (v1.1 for Windows 2000) synthesizer.
+  * Disassembled (**x86**) / statically recompiled (**llasm** / **x64**) version of WebSynth D-77 (v1.1 for Windows 2000) synthesizer.
   * This allows using the software synthesizer on other *CPU* architectures (32-bit, 64-bit) and platforms.
   * 64-bit version only works with 32-bit addresses - the code and all data it uses must be in the first 2GB of memory space.
 * **d77_alsadrv**
   * Linux daemon which provides [ALSA](https://en.wikipedia.org/wiki/Advanced_Linux_Sound_Architecture) MIDI sequencer interface using *websynth*.
   * It requires the WebSynth D-77 datafile *dswebWDM.dat* (or *dswebsyn.dat*).
-  * Compilation for x86 requires [gcc](https://gcc.gnu.org/) and [nasm](https://www.nasm.us/).
-  * Compilation for other architectures requires [gcc](https://gcc.gnu.org/), [llvm](https://llvm.org/) and [llasm](https://github.com/M-HT/SR/tree/master/llasm) (from [SR project](https://github.com/M-HT/SR)).
+  * Compilation for x86/x64 requires [gcc](https://gcc.gnu.org/)/[clang](https://clang.llvm.org/) and [nasm](https://www.nasm.us/).
+  * Compilation for other architectures requires [gcc](https://gcc.gnu.org/)/[clang](https://clang.llvm.org/), [llvm](https://llvm.org/) and [llasm](https://github.com/M-HT/SR/tree/master/llasm) (from [SR project](https://github.com/M-HT/SR)).
 * **d77_pcmconvert**
   * Tool to convert [Standard MIDI File](https://www.midi.org/specifications-old/item/standard-midi-files-smf) to *PCM* (*WAV* or *RAW*) using *websynth*.
   * It requires the WebSynth D-77 datafile *dswebWDM.dat* (or *dswebsyn.dat*).
-  * Compilation for x86 requires [gcc](https://gcc.gnu.org/) and [nasm](https://www.nasm.us/).
-  * Compilation for other architectures requires [gcc](https://gcc.gnu.org/), [llvm](https://llvm.org/) and [llasm](https://github.com/M-HT/SR/tree/master/llasm) (from [SR project](https://github.com/M-HT/SR)).
+  * Compilation for x86/x64 requires [gcc](https://gcc.gnu.org/)/[clang](https://clang.llvm.org/)/[MSVC](https://visualstudio.microsoft.com/vs/features/cplusplus/) and [nasm](https://www.nasm.us/).
+  * Compilation for other architectures requires [gcc](https://gcc.gnu.org/)/[clang](https://clang.llvm.org/)/[MSVC](https://visualstudio.microsoft.com/vs/features/cplusplus/), [llvm](https://llvm.org/) and [llasm](https://github.com/M-HT/SR/tree/master/llasm) (from [SR project](https://github.com/M-HT/SR)).
 * **datafile**
   * WebSynth D-77 (v1.1 for Windows 2000) datafile *dswebWDM.dat*
 * **documentation**

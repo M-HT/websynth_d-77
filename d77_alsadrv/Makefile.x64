@@ -1,22 +1,29 @@
 all: d77_alsadrv d77_lib.so
 
-llasm_lib_c_files := ../websynth/llasm/asm-cpu-var.c ../websynth/llasm/llasm_movs.c ../websynth/llasm/llasm_pushx.c ../websynth/llasm/llasm_stos.c
-llasm_lib_h_files := ../websynth/llasm/llasm_cpu.h
-llasm_indirect_c_files := ../websynth/llasm/asm-cpu.c ../websynth/llasm/functions-llasm.c ../websynth/llasm/llasm_float.c ../websynth/llasm/indirect/functions-32bit.c
-llasm_indirect_h_files := ../websynth/llasm/llasm_cpu.h  ../websynth/llasm/indirect/functions-32bit.h ../websynth/llasm/indirect/symbol-table.h
-llasm_object_file := ../websynth/llasm/dswbsWDM.o
-llasm_source_file := ../websynth/llasm/dswbsWDM.llasm
-llasm_include_files := ../websynth/llasm/extern.llinc ../websynth/llasm/llasm.llinc ../websynth/llasm/llasm_float.llinc ../websynth/llasm/llasm_movs.llinc ../websynth/llasm/llasm_pushx.llinc ../websynth/llasm/llasm_stos.llinc ../websynth/llasm/macros.llinc ../websynth/llasm/seg01_code.llinc ../websynth/llasm/seg01_data.llinc ../websynth/llasm/seg02_data.llinc ../websynth/llasm/seg03_data.llinc ../websynth/llasm/seg05_data.llinc
+x64_indirect_c_files := ../websynth/x64/asm-cpu.c ../websynth/x64/functions-x64.c ../websynth/indirect/functions-32bit.c ../websynth/x64/indirect/symbol-table.c
+x64_indirect_h_files := ../websynth/x64/x64_stack.h  ../websynth/indirect/functions-32bit.h
+x64_object_files := ../websynth/x64/dswbsWDM.o ../websynth/x64/CLIB-asm.o ../websynth/x64/functions-asm.o ../websynth/x64/indirect/start.o
+x64_main_include_files := ../websynth/x64/extern.inc ../websynth/x64/misc.inc ../websynth/x64/seg01.inc ../websynth/x64/seg02.inc ../websynth/x64/seg03.inc ../websynth/x64/seg05.inc
+x64_other_include_files := ../websynth/x64/x64inc.inc ../websynth/x64/asm_call.inc ../websynth/x64/asm_pushx.inc ../websynth/x64/asm_unwind.inc
+x64_lib_symb_file := ../websynth/x64/indirect/d77_lib.symb
 
-$(llasm_object_file): $(llasm_source_file) $(llasm_include_files)
-	llasm $(llasm_source_file) -O -m64 -pic -inline-float | opt -O3 | llc -O=3 -filetype=obj -mtriple=x86_64-unknown-linux-gnu --relocation-model=pic > $(llasm_object_file)
+CC1 != echo "${CC}" | cut -d' ' -f1
+IMAGEBASE != if [ -n "`$(CC1) --help -v 2>/dev/null | grep -- -Ttext-segment`" ] ; then echo "-Ttext-segment"; else echo "--image-base"; fi
 
-d77_alsadrv: d77_alsadrv.c ../websynth/websynth.h $(llasm_indirect_c_files) $(llasm_indirect_h_files)
-	$(CC) -s -m64 -O2 -Wall -DINDIRECT_64BIT -o d77_alsadrv d77_alsadrv.c $(llasm_indirect_c_files) -I../websynth -I../websynth/llasm -I../websynth/llasm/indirect -lasound -lpthread -lm
+../websynth/x64/dswbsWDM.o: ../websynth/x64/dswbsWDM.asm $(x64_main_include_files) $(x64_other_include_files)
+../websynth/x64/CLIB-asm.o: ../websynth/x64/CLIB-asm.asm $(x64_other_include_files)
+../websynth/x64/functions-asm.o: ../websynth/x64/functions-asm.asm $(x64_other_include_files)
 
-d77_lib.so: $(llasm_lib_c_files) $(llasm_lib_h_files) $(llasm_object_file)
-	$(CC) -s -nostdlib -m64 -fpic -O2 -Wall -fvisibility=hidden -fno-ident -shared -Wl,-soname,d77_lib.so -o d77_lib.so $(llasm_lib_c_files) $(llasm_object_file) -I../websynth/llasm
+.SUFFIXES: .asm .o
+.asm.o:
+	nasm $< -felf64 -Ox -i../websynth/x64/ -o$@
+
+d77_alsadrv: d77_alsadrv.c ../websynth/websynth.h $(x64_indirect_c_files) $(x64_indirect_h_files)
+	$(CC) -s -m64 -O2 -Wall -DINDIRECT_64BIT -o d77_alsadrv d77_alsadrv.c $(x64_indirect_c_files) -I../websynth -I../websynth/x64 -I../websynth/indirect -lasound -lpthread -lm
+
+d77_lib.so: $(x64_object_files) $(x64_lib_symb_file)
+	$(CC) -nostdlib -m64 -Wl,-no-pie -Wl,--retain-symbols-file,$(x64_lib_symb_file) -Wl,--discard-all -Wl,$(IMAGEBASE),0x10000000 -Wl,-soname,d77_lib.so -o d77_lib.so $(x64_object_files)
 
 .PHONY: clean
 clean:
-	rm -f d77_alsadrv d77_lib.so $(llasm_object_file)
+	rm -f d77_alsadrv d77_lib.so $(x64_object_files)

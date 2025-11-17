@@ -1,0 +1,14 @@
+loc_40A8F0,ValidateSettings_asm
+loc_409C20,InitializeDataFile_asm
+loc_409C50,InitializeSynth_asm
+loc_40A4D0,InitializeUnknown_asm
+loc_40A480,InitializeEffect_asm
+loc_40A540,InitializeCpuLoad_asm
+loc_40A5A0,InitializeParameters_asm
+loc_40A3C0,InitializeMasterVolume_asm
+
+loc_409CE0,MidiMessageShort_asm
+loc_40A260,MidiMessageLong_asm
+
+loc_40A360,RenderSamples_asm
+loc_441848,dwRenderedSamplesPerCall_asm
