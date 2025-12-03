@@ -1972,7 +1972,7 @@ error1:
 
     elf_header = (Elf64_Ehdr *)library;
 
-    if ((elf_header->e_machine != EM_X86_64) && (elf_header->e_machine != EM_AARCH64))
+    if ((elf_header->e_machine != EM_X86_64) && (elf_header->e_machine != EM_AARCH64) && (elf_header->e_machine != EM_RISCV))
     {
         fprintf(stderr, "Error: unsuported machine type\n");
         goto error1;
@@ -2026,8 +2026,9 @@ error1:
         for (section_offset = 0; section_offset < relsize; section_offset += dynamic_entries[DT_RELAENT])
         {
             relocation = (Elf64_Rela *)(library + reladdr + section_offset);
-            if (((relocation->r_info & 0xffffffff) == R_X86_64_JUMP_SLOT) ||
-                ((relocation->r_info & 0xffffffff) == R_AARCH64_JUMP_SLOT)
+            if (((elf_header->e_machine == EM_X86_64) && ((relocation->r_info & 0xffffffff) == R_X86_64_JUMP_SLOT)) ||
+                ((elf_header->e_machine == EM_AARCH64) && ((relocation->r_info & 0xffffffff) == R_AARCH64_JUMP_SLOT)) ||
+                ((elf_header->e_machine == EM_RISCV) && ((relocation->r_info & 0xffffffff) == R_RISCV_JUMP_SLOT))
                )
             {
                 if (dynamic_entries[DT_SYMTAB] == 0 || dynamic_entries[DT_SYMENT] == 0) goto error1;
@@ -2068,8 +2069,9 @@ error1:
                     *(uint64_t *)(library + relocation->r_offset) = (uintptr_t)(library + symbol->st_value);
                 }
             }
-            else if (((relocation->r_info & 0xffffffff) == R_X86_64_RELATIVE) ||
-                     ((relocation->r_info & 0xffffffff) == R_AARCH64_RELATIVE)
+            else if (((elf_header->e_machine == EM_X86_64) && ((relocation->r_info & 0xffffffff) == R_X86_64_RELATIVE)) ||
+                     ((elf_header->e_machine == EM_AARCH64) && ((relocation->r_info & 0xffffffff) == R_AARCH64_RELATIVE)) ||
+                     ((elf_header->e_machine == EM_RISCV) && ((relocation->r_info & 0xffffffff) == R_RISCV_RELATIVE))
                     )
             {
                 *(uint64_t *)(library + relocation->r_offset) = (uintptr_t)(library + relocation->r_addend);
