@@ -37,6 +37,16 @@
 #if !defined(IMAGE_SIZEOF_NT_OPTIONAL64_HEADER)
 #define IMAGE_SIZEOF_NT_OPTIONAL64_HEADER 240
 #endif
+#elif defined(__APPLE__)
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <mach/mach_init.h>
+#include <mach/mach_vm.h>
+#include <mach-o/loader.h>
+#include <mach-o/nlist.h>
+#include <sys/mman.h>
 #else
 #include <inttypes.h>
 #include <stdio.h>
@@ -69,6 +79,7 @@ extern const struct
 // https://gist.github.com/x0nu11byt3/bcb35c3de461e5fb66173071a2379779
 
 
+#ifndef __APPLE__
 static void *reserve_address_space(uintptr_t maddr, unsigned int size)
 {
 #ifdef _WIN32
@@ -105,6 +116,7 @@ static void *reserve_address_space(uintptr_t maddr, unsigned int size)
     return NULL;
 #endif
 }
+#endif
 
 void *map_memory_32bit(unsigned int size, int only_address_space)
 {
@@ -150,6 +162,107 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
         maddr = ((minfo.RegionSize + (uintptr_t)minfo.BaseAddress) + (sinfo.dwAllocationGranularity - 1)) & ~(sinfo.dwAllocationGranularity - 1);
     }
 
+    return NULL;
+#elif defined(__APPLE__)
+    void *mem, *start;
+    long page_size;
+    int prot, flags;
+    mach_port_t task;
+    mach_vm_address_t region_address, free_region_start, free_region_end;
+    mach_vm_size_t region_size;
+    vm_region_basic_info_data_t info;
+    mach_msg_type_number_t count;
+    mach_port_t object_name;
+
+    if (size == 0) return NULL;
+
+    prot = only_address_space ? PROT_NONE : (PROT_READ | PROT_WRITE);
+    flags = MAP_PRIVATE | MAP_ANONYMOUS | (only_address_space ? MAP_NORESERVE : 0);
+
+    // if platform supports MAP_32BIT, then try mapping memory with it
+#if defined(MAP_32BIT) && (MAP_32BIT != 0)
+    mem = mmap(0, size, prot, MAP_32BIT | flags, -1, 0);
+    if (mem != MAP_FAILED)
+    {
+        if (((uintptr_t)mem >= UINT64_C(0x80000000)) || (size + (uintptr_t)mem > UINT64_C(0x80000000)))
+        {
+            // mapped memory is above 2GB
+            munmap(mem, size);
+        }
+        else
+        {
+            return mem;
+        }
+    }
+#endif
+
+    // look for unused memory below 2GB and try mapping memory there
+    page_size = sysconf(_SC_PAGESIZE);
+    if (page_size <= 0) page_size = 4096;
+
+    task = current_task();
+
+    region_address = 0;
+    count = VM_REGION_BASIC_INFO_COUNT_64;
+    if (KERN_SUCCESS != mach_vm_region(task, &region_address, &region_size, VM_REGION_BASIC_INFO, (vm_region_info_t) &info, &count, &object_name)) return NULL;
+
+    // first free region (starting at address zero) belongs to segment __PAGEZERO, so don't try using memory here
+
+    if (region_address >= UINT64_C(0x80000000)) return NULL;
+
+    free_region_start = region_address + region_size;
+    while (free_region_start < UINT64_C(0x80000000))
+    {
+        region_address = free_region_start;
+        count = VM_REGION_BASIC_INFO_COUNT_64;
+        if (KERN_SUCCESS != mach_vm_region(task, &region_address, &region_size, VM_REGION_BASIC_INFO, (vm_region_info_t) &info, &count, &object_name))
+        {
+            region_address = free_region_end = UINT64_C(0x80000000);
+            region_size = 0;
+        }
+        else
+        {
+            free_region_end = region_address;
+            if (free_region_end >= UINT64_C(0x80000000))
+            {
+                free_region_end = UINT64_C(0x80000000);
+                region_size = 0;
+            }
+        }
+
+        if (free_region_end - free_region_start >= size)
+        {
+            // try using memory at the start of the free region
+            start = (void *)free_region_start;
+            mem = mmap(start, size, prot, MAP_FIXED | flags, -1, 0);
+            if (mem == start) return mem;
+            if (mem != MAP_FAILED)
+            {
+                munmap(start, size);
+                goto error1;
+            }
+
+            // try using memory at the end of the free region
+            start = (void *)((free_region_end - size) & ~(page_size - 1));
+            if (start != (void *)free_region_start)
+            {
+                mem = mmap(start, size, prot, MAP_FIXED | flags, -1, 0);
+                if (mem == start) return mem;
+                if (mem != MAP_FAILED)
+                {
+                    munmap(start, size);
+                    goto error1;
+                }
+            }
+        }
+
+        free_region_start = region_address + region_size;
+    }
+
+    return NULL;
+
+error1:
+    fprintf(stderr, "Error: memory mapped at different address\n");
     return NULL;
 #else
     void *mem, *start;
@@ -563,6 +676,533 @@ error2:
 error1:
     HeapFree(heap, 0, sec_headers);
     return NULL;
+}
+
+#elif defined(__APPLE__)
+
+static long int read2(int fd, void *buf, unsigned long int count)
+{
+    long int res;
+    unsigned long int count2;
+
+    count2 = 0;
+    while (1)
+    {
+        res = read(fd, buf, count);
+        if (res < 0) return res; // error
+
+        if (res == 0) return count2; // end of file
+
+        count2 += res;
+        count -= res;
+
+        if (count == 0) return count2; // full buffer
+
+        buf = (void *) (res + (uintptr_t)buf);
+    }
+}
+
+static uint8_t *load_library_from_file_macos(int fd, uint64_t *libsize)
+{
+    struct mach_header_64 header;
+    uint8_t *load_commands;
+    struct segment_command_64 *seg_cmd;
+    uint8_t *base_addr, *start, *segment;
+    int64_t page_size;
+    uint64_t min_addr, max_addr, length, page_offset, filesz;
+    int index, prot;
+
+    if (lseek(fd, 0, SEEK_SET) < 0) goto error1;
+
+    if (read2(fd, &header, sizeof(header)) != sizeof(header)) goto error1;
+
+    if ((header.magic != MH_MAGIC_64) ||
+        (header.filetype != MH_BUNDLE) ||
+        (header.ncmds == 0) ||
+        (header.sizeofcmds == 0) ||
+        ((header.flags != (MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL)) && (header.flags != (MH_DYLDLINK))) ||
+        header.reserved != 0
+       ) goto error1;
+
+    if (lseek(fd, sizeof(struct mach_header_64), SEEK_SET) < 0) goto error1;
+
+    load_commands = (uint8_t *)malloc(header.sizeofcmds);
+    if (load_commands == NULL) goto error1;
+
+    if (read2(fd, load_commands, header.sizeofcmds) != header.sizeofcmds) goto error2;
+
+    // get page size
+    page_size = sysconf(_SC_PAGESIZE);
+    if (page_size <= 0) page_size = 4096;
+
+    // get minimum and maximum address for loading
+    max_addr = 0;
+    min_addr = (int64_t)-1;
+    seg_cmd = (struct segment_command_64 *)load_commands;
+    for (index = 0; index < header.ncmds; index++, seg_cmd = (struct segment_command_64 *)(seg_cmd->cmdsize + (uintptr_t)seg_cmd))
+    {
+        if (seg_cmd->cmd != LC_SEGMENT_64) continue;
+
+        if (seg_cmd->vmaddr < min_addr)
+        {
+            min_addr = seg_cmd->vmaddr;
+        }
+        if (seg_cmd->vmaddr + seg_cmd->vmsize > max_addr)
+        {
+            max_addr = seg_cmd->vmaddr + seg_cmd->vmsize;
+        }
+    }
+
+    // align minimum and maximum address to page size
+    min_addr = min_addr & ~(page_size - 1);
+    max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+
+    if (min_addr != 0)
+    {
+        fprintf(stderr, "Error: headers not loaded\n");
+        goto error2;
+    }
+
+    base_addr = (uint8_t *) map_memory_32bit(max_addr, 1);
+    if (base_addr == NULL) goto error2;
+
+    // load segments into memory
+    seg_cmd = (struct segment_command_64 *)load_commands;
+    for (index = 0; index < header.ncmds; index++, seg_cmd = (struct segment_command_64 *)(seg_cmd->cmdsize + (uintptr_t)seg_cmd))
+    {
+        if (seg_cmd->cmd != LC_SEGMENT_64) continue;
+
+        page_offset = seg_cmd->vmaddr & (page_size - 1);
+        start = base_addr + (seg_cmd->vmaddr - min_addr) - page_offset;
+        length = (page_offset + seg_cmd->vmsize + (page_size - 1)) & ~(page_size - 1);
+
+        prot = PROT_NONE;
+        if (seg_cmd->initprot & VM_PROT_EXECUTE) prot |= PROT_EXEC;
+        if (seg_cmd->initprot & VM_PROT_WRITE) prot |= PROT_WRITE;
+        if (seg_cmd->initprot & VM_PROT_READ) prot |= PROT_READ;
+
+        segment = (uint8_t *)mmap(start, length, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+        if (segment == MAP_FAILED) goto error3;
+
+        filesz = seg_cmd->filesize;
+        if (seg_cmd->vmsize < filesz) filesz = seg_cmd->vmsize;
+
+        if (filesz != 0)
+        {
+            if (lseek(fd, seg_cmd->fileoff, SEEK_SET) < 0) goto error3;
+
+            if (read2(fd, segment + page_offset, filesz) != filesz) goto error3;
+
+            if (seg_cmd->initprot & VM_PROT_EXECUTE)
+            {
+                __builtin___clear_cache((char *)(segment + page_offset), (char *)(segment + page_offset + filesz));
+            }
+        }
+
+        if (mprotect(segment, length, prot) < 0) goto error3;
+    }
+
+    free(load_commands);
+
+    *libsize = max_addr;
+    return base_addr;
+
+error3:
+    munmap(base_addr, max_addr);
+
+error2:
+    free(load_commands);
+
+error1:
+    return NULL;
+}
+
+static uint8_t *load_library_from_memory_macos(int fd, uint8_t *mem, uint64_t *libsize)
+{
+    struct mach_header_64 *header;
+    struct segment_command_64 *seg_cmd;
+    uint8_t *base_addr, *start, *segment;
+    int64_t page_size;
+    uint64_t min_addr, max_addr, length, page_offset, filesz;
+    int index, prot;
+
+    header = (struct mach_header_64 *)mem;
+
+    if ((header->magic != MH_MAGIC_64) ||
+        (header->filetype != MH_BUNDLE) ||
+        (header->ncmds == 0) ||
+        (header->sizeofcmds == 0) ||
+        ((header->flags != (MH_NOUNDEFS | MH_DYLDLINK | MH_TWOLEVEL)) && (header->flags != (MH_DYLDLINK))) ||
+        header->reserved != 0
+       ) goto error1;
+
+    // get page size
+    page_size = sysconf(_SC_PAGESIZE);
+    if (page_size <= 0) page_size = 4096;
+
+    // get minimum and maximum address for loading
+    max_addr = 0;
+    min_addr = (int64_t)-1;
+    seg_cmd = (struct segment_command_64 *)(mem + sizeof(struct mach_header_64));
+    for (index = 0; index < header->ncmds; index++, seg_cmd = (struct segment_command_64 *)(seg_cmd->cmdsize + (uintptr_t)seg_cmd))
+    {
+        if (seg_cmd->cmd != LC_SEGMENT_64) continue;
+
+        if (seg_cmd->vmaddr < min_addr)
+        {
+            min_addr = seg_cmd->vmaddr;
+        }
+        if (seg_cmd->vmaddr + seg_cmd->vmsize > max_addr)
+        {
+            max_addr = seg_cmd->vmaddr + seg_cmd->vmsize;
+        }
+    }
+
+    // align minimum and maximum address to page size
+    min_addr = min_addr & ~(page_size - 1);
+    max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+
+    if (min_addr != 0)
+    {
+        fprintf(stderr, "Error: headers not loaded\n");
+        goto error1;
+    }
+
+    base_addr = (uint8_t *) map_memory_32bit(max_addr, 1);
+    if (base_addr == NULL) goto error1;
+
+    // map segments into memory
+    seg_cmd = (struct segment_command_64 *)(mem + sizeof(struct mach_header_64));
+    for (index = 0; index < header->ncmds; index++, seg_cmd = (struct segment_command_64 *)(seg_cmd->cmdsize + (uintptr_t)seg_cmd))
+    {
+        if (seg_cmd->cmd != LC_SEGMENT_64) continue;
+
+        page_offset = seg_cmd->vmaddr & (page_size - 1);
+        start = base_addr + (seg_cmd->vmaddr - min_addr) - page_offset;
+        length = (page_offset + seg_cmd->vmsize + (page_size - 1)) & ~(page_size - 1);
+
+        prot = PROT_NONE;
+        if (seg_cmd->initprot & VM_PROT_EXECUTE) prot |= PROT_EXEC;
+        if (seg_cmd->initprot & VM_PROT_WRITE) prot |= PROT_WRITE;
+        if (seg_cmd->initprot & VM_PROT_READ) prot |= PROT_READ;
+
+        if ((page_offset == 0) && (seg_cmd->filesize == seg_cmd->vmsize) && !(seg_cmd->fileoff & (page_size - 1)))
+        {
+            segment = (uint8_t *)mmap(start, seg_cmd->filesize, prot, MAP_PRIVATE | MAP_FIXED, fd, seg_cmd->fileoff);
+            if (segment == MAP_FAILED) goto error2;
+        }
+        else
+        {
+            segment = (uint8_t *)mmap(start, length, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+            if (segment == MAP_FAILED) goto error2;
+
+            filesz = seg_cmd->filesize;
+            if (seg_cmd->vmsize < filesz) filesz = seg_cmd->vmsize;
+
+            if (filesz != 0)
+            {
+                memcpy(segment + page_offset, mem + seg_cmd->fileoff, filesz);
+
+                if (seg_cmd->initprot & VM_PROT_EXECUTE)
+                {
+                    __builtin___clear_cache((char *)(segment + page_offset), (char *)(segment + page_offset + filesz));
+                }
+            }
+
+            if (mprotect(segment, length, prot) < 0) goto error2;
+        }
+    }
+
+    *libsize = max_addr;
+    return base_addr;
+
+error2:
+    munmap(base_addr, max_addr);
+
+error1:
+    return NULL;
+}
+
+static uint64_t read_uleb128(uint8_t **pptr)
+{
+    uint8_t *ptr;
+    uint64_t result;
+    unsigned int shift, value;
+
+    ptr = *pptr;
+    result = 0;
+    shift = 0;
+
+    do {
+        value = *ptr++;
+        result |= (value & 0x7f) << shift;
+        shift += 7;
+    } while (value & 0x80);
+
+    *pptr = ptr;
+    return result;
+}
+
+static uint64_t get_segment_address(uint8_t *library, uint8_t seg_num, uint64_t offset)
+{
+    struct mach_header_64 *header;
+    struct segment_command_64 *seg_cmd;
+    unsigned int index;
+
+    header = (struct mach_header_64 *)library;
+
+    seg_cmd = (struct segment_command_64 *)(library + sizeof(struct mach_header_64));
+    for (index = 0; index < header->ncmds; index++, seg_cmd = (struct segment_command_64 *)(seg_cmd->cmdsize + (uintptr_t)seg_cmd))
+    {
+        if (seg_cmd->cmd != LC_SEGMENT_64) continue;
+
+        if (seg_num == 0) return (uint64_t)(library + seg_cmd->vmaddr + offset);
+
+        seg_num--;
+    }
+
+    return 0;
+}
+
+static uint8_t *get_file_address(uint8_t *library, uint64_t offset)
+{
+    struct mach_header_64 *header;
+    struct segment_command_64 *seg_cmd;
+    uint8_t *result;
+    unsigned int index;
+
+    header = (struct mach_header_64 *)library;
+
+    result = NULL;
+    seg_cmd = (struct segment_command_64 *)(library + sizeof(struct mach_header_64));
+    for (index = 0; index < header->ncmds; index++, seg_cmd = (struct segment_command_64 *)(seg_cmd->cmdsize + (uintptr_t)seg_cmd))
+    {
+        if (seg_cmd->cmd != LC_SEGMENT_64) continue;
+
+        if (offset >= seg_cmd->fileoff && offset < seg_cmd->fileoff + seg_cmd->filesize)
+        {
+            result = library + offset + seg_cmd->vmaddr - seg_cmd->fileoff;
+            break;
+        }
+    }
+
+    return result;
+}
+
+static int rebase_address(uint8_t *library, uint64_t address, uint8_t type)
+{
+    if (address == 0) return 0;
+
+    if (type != REBASE_TYPE_POINTER)
+    {
+        fprintf(stderr, "Error: unsupported rebase type\n");
+        return 0;
+    }
+
+    *(uint64_t *)address += (uint64_t)library;
+    return 1;
+}
+
+static int bind_address(uint64_t address, uint8_t type, uint64_t addend, const char *symbol, uint8_t flags, int64_t ordinal)
+{
+    unsigned int indsymb;
+    void *symbvalue;
+
+    if (symbol == NULL) return 0;
+
+    if (flags != 0)
+    {
+        fprintf(stderr, "Error: unsupported bind flags\n");
+        return 0;
+    }
+
+    if (ordinal != BIND_SPECIAL_DYLIB_FLAT_LOOKUP)
+    {
+        fprintf(stderr, "Error: unsupported bind lookup\n");
+        return 0;
+    }
+
+    if (address == 0) return 0;
+
+    if (type != BIND_TYPE_POINTER)
+    {
+        fprintf(stderr, "Error: unsupported bind type\n");
+        return 0;
+    }
+
+    if (*symbol != '_')
+    {
+        // dyld_stub_binder is not needed, because lazy binding is not used (all symbols are binded immediatelly)
+        if (0 != strcmp(symbol, "dyld_stub_binder"))
+        {
+            fprintf(stderr, "Error: symbol not found: %s\n", symbol);
+            return 0;
+        }
+        return 1;
+    }
+
+    symbvalue = NULL;
+    for (indsymb = 0; symbol_table_32bit[indsymb].name != NULL; indsymb++)
+    {
+        if (0 == strcmp(symbol + 1, symbol_table_32bit[indsymb].name))
+        {
+            symbvalue = symbol_table_32bit[indsymb].value;
+            break;
+        }
+    }
+
+    if (symbvalue == NULL)
+    {
+        fprintf(stderr, "Error: symbol not found: %s\n", symbol);
+        return 0;
+    }
+
+    *(uint64_t *)address = addend + (uint64_t)symbvalue;
+    return 1;
+}
+
+static int rebase_library(uint8_t *library, uint64_t rebase_offset)
+{
+    uint8_t *rebase;
+    uint8_t value, type;
+    uint64_t address, times, skip;
+
+    rebase = get_file_address(library, rebase_offset);
+    if (rebase == NULL) return 0;
+
+    type = REBASE_TYPE_POINTER;
+    address = 0;
+
+    for (;;)
+    {
+        value = *rebase++;
+
+        switch (value & REBASE_OPCODE_MASK)
+        {
+            case REBASE_OPCODE_DONE:
+                return 1;
+            case REBASE_OPCODE_SET_TYPE_IMM:
+                type = value & REBASE_IMMEDIATE_MASK;
+                break;
+            case REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+                address = get_segment_address(library, value & REBASE_IMMEDIATE_MASK, read_uleb128(&rebase));
+                break;
+            case REBASE_OPCODE_ADD_ADDR_ULEB:
+                address += read_uleb128(&rebase);
+                break;
+            case REBASE_OPCODE_ADD_ADDR_IMM_SCALED:
+                address += 8 * (value & REBASE_IMMEDIATE_MASK);
+                break;
+            case REBASE_OPCODE_DO_REBASE_IMM_TIMES:
+                for (times = value & REBASE_IMMEDIATE_MASK; times != 0; times--)
+                {
+                    if (!rebase_address(library, address, type)) return 0;
+                    address += 8;
+                }
+                break;
+            case REBASE_OPCODE_DO_REBASE_ULEB_TIMES:
+                for (times = read_uleb128(&rebase); times != 0; times--)
+                {
+                    if (!rebase_address(library, address, type)) return 0;
+                    address += 8;
+                }
+                break;
+            case REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
+                if (!rebase_address(library, address, type)) return 0;
+                address += read_uleb128(&rebase) + 8;
+                break;
+            case REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB:
+                for (times = read_uleb128(&rebase), skip = read_uleb128(&rebase); times != 0; times--)
+                {
+                    if (!rebase_address(library, address, type)) return 0;
+                    address += skip + 8;
+                }
+                break;
+            default:
+                fprintf(stderr, "Error: unsupported rebase opcode\n");
+                return 0;
+        }
+    }
+}
+
+static int bind_library_symbols(uint8_t *library, uint64_t bind_offset, uint64_t bind_size)
+{
+    uint8_t *bind, *bind_end;
+    uint8_t value, type, flags;
+    int64_t ordinal;
+    uint64_t address, addend, times, skip;
+    const char *symbol;
+
+    bind = get_file_address(library, bind_offset);
+    if (bind == NULL) return 0;
+
+    bind_end = bind + bind_size;
+
+    type = BIND_TYPE_POINTER;
+    flags = ordinal = address = addend = 0;
+    symbol = NULL;
+
+    for (;;)
+    {
+        value = *bind++;
+
+        switch (value & BIND_OPCODE_MASK)
+        {
+            case BIND_OPCODE_DONE:
+                if (bind >= bind_end) return 1;
+                break;
+            case BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
+                ordinal = value & BIND_IMMEDIATE_MASK;
+                break;
+            case BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
+                ordinal = read_uleb128(&bind);
+                break;
+            case BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
+                ordinal = value & BIND_IMMEDIATE_MASK;
+                if (ordinal) ordinal = (int8_t)(ordinal | BIND_OPCODE_MASK);
+                break;
+            case BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
+                symbol = (const char *)bind;
+                flags = value & BIND_IMMEDIATE_MASK;
+                while (*bind != 0) bind++;
+                bind++;
+                break;
+            case BIND_OPCODE_SET_TYPE_IMM:
+                type = value & BIND_IMMEDIATE_MASK;
+                break;
+            case BIND_OPCODE_SET_ADDEND_SLEB:
+                addend = read_uleb128(&bind);
+                break;
+            case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+                address = get_segment_address(library, value & BIND_IMMEDIATE_MASK, read_uleb128(&bind));
+                break;
+            case BIND_OPCODE_ADD_ADDR_ULEB:
+                address += read_uleb128(&bind);
+                break;
+            case BIND_OPCODE_DO_BIND:
+                if (!bind_address(address, type, addend, symbol, flags, ordinal)) return 0;
+                address += 8;
+                break;
+            case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
+                if (!bind_address(address, type, addend, symbol, flags, ordinal)) return 0;
+                address += read_uleb128(&bind) + 8;
+                break;
+            case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
+                if (!bind_address(address, type, addend, symbol, flags, ordinal)) return 0;
+                address += (value & BIND_IMMEDIATE_MASK) * 8;
+                break;
+            case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
+                for (times = read_uleb128(&bind), skip = read_uleb128(&bind); times != 0; times--)
+                {
+                    if (!bind_address(address, type, addend, symbol, flags, ordinal)) return 0;
+                    address += skip + 8;
+                }
+                break;
+            default:
+                fprintf(stderr, "Error: unsupported bind opcode\n");
+                return 0;
+        }
+    }
 }
 
 #else
@@ -1150,6 +1790,143 @@ void *load_library_32bit(const char *libpath)
 error1:
     VirtualFree(library, 0, MEM_RELEASE);
     return NULL;
+#elif defined(__APPLE__)
+    int fd, prot;
+    off_t len;
+    uint8_t *mem, *library;
+    uint64_t libsize, section_offset;
+    struct mach_header_64 *header;
+    struct segment_command_64 *seg_cmd;
+    struct section_64 *section_hdr;
+    struct dyld_info_command *dyld_info_cmd;
+    struct symtab_command *symtab_cmd;
+    struct dysymtab_command *dsymtab_cmd;
+    struct load_command *load_cmd;
+    unsigned int index, index2;
+
+    if (sizeof(void *) != 8) return NULL;
+
+    // open file
+    fd = open(libpath, O_RDONLY);
+    if (fd < 0) return NULL;
+
+    len = lseek(fd, 0, SEEK_END);
+    if (len < sizeof(struct mach_header_64)) // error seeking or file is smaller than 64-bit mach header
+    {
+        close(fd);
+        return NULL;
+    }
+
+    // map whole file into memory
+    mem = (uint8_t *) mmap(NULL, len, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (mem != MAP_FAILED)
+    {
+        library = load_library_from_memory_macos(fd, mem, &libsize);
+        munmap(mem, len);
+        close(fd);
+    }
+    else
+    {
+        library = load_library_from_file_macos(fd, &libsize);
+        close(fd);
+    }
+
+    if (library == NULL) return NULL;
+
+    header = (struct mach_header_64 *)library;
+
+    if (header->cputype != CPU_TYPE_X86_64)
+    {
+        fprintf(stderr, "Error: unsuported cpu type\n");
+        goto error1;
+    }
+
+    // unsupported: loading libraries
+
+    // find commands and check for required commands
+    dyld_info_cmd = NULL;
+    symtab_cmd = NULL;
+    dsymtab_cmd = NULL;
+    load_cmd = (struct load_command *)(library + sizeof(struct mach_header_64));
+    for (index = 0; index < header->ncmds; index++, load_cmd = (struct load_command *)(load_cmd->cmdsize + (uintptr_t)load_cmd))
+    {
+        if (load_cmd->cmd == LC_DYLD_INFO_ONLY)
+        {
+            dyld_info_cmd = (struct dyld_info_command *)load_cmd;
+        }
+        else if (load_cmd->cmd == LC_SYMTAB)
+        {
+            symtab_cmd = (struct symtab_command *)load_cmd;
+        }
+        else if (load_cmd->cmd == LC_DYSYMTAB)
+        {
+            dsymtab_cmd = (struct dysymtab_command *)load_cmd;
+        }
+        else if ((load_cmd->cmd & LC_REQ_DYLD) || (load_cmd->cmd < LC_SEGMENT_64))
+        {
+            fprintf(stderr, "Error: unsuported command\n");
+            goto error1;
+        }
+    }
+
+    // apply relocations and external symbols
+    if (dyld_info_cmd == NULL || symtab_cmd == NULL || dsymtab_cmd == NULL)
+    {
+        fprintf(stderr, "Error: missing commands\n");
+        goto error1;
+    }
+    if (dyld_info_cmd->rebase_size != 0)
+    {
+        if (!rebase_library(library, dyld_info_cmd->rebase_off)) goto error1;
+    }
+    if (dyld_info_cmd->bind_size != 0)
+    {
+        if (!bind_library_symbols(library, dyld_info_cmd->bind_off, dyld_info_cmd->bind_size)) goto error1;
+    }
+    if (dyld_info_cmd->lazy_bind_size != 0)
+    {
+        if (!bind_library_symbols(library, dyld_info_cmd->lazy_bind_off, dyld_info_cmd->lazy_bind_size)) goto error1;
+    }
+
+    // make segments read-only
+    seg_cmd = (struct segment_command_64 *)(library + sizeof(struct mach_header_64));
+    for (index = 0; index < header->ncmds; index++, seg_cmd = (struct segment_command_64 *)(seg_cmd->cmdsize + (uintptr_t)seg_cmd))
+    {
+        if (seg_cmd->cmd != LC_SEGMENT_64) continue;
+        if (!(seg_cmd->flags & SG_READ_ONLY)) continue;
+
+        prot = PROT_NONE;
+        if (seg_cmd->initprot & VM_PROT_EXECUTE) prot |= PROT_EXEC;
+        if (seg_cmd->initprot & VM_PROT_READ) prot |= PROT_READ;
+
+        if (mprotect(library + seg_cmd->vmaddr, seg_cmd->vmsize, prot) < 0) goto error1;
+    }
+
+    // run constructors
+    seg_cmd = (struct segment_command_64 *)(library + sizeof(struct mach_header_64));
+    for (index = 0; index < header->ncmds; index++, seg_cmd = (struct segment_command_64 *)(seg_cmd->cmdsize + (uintptr_t)seg_cmd))
+    {
+        if (seg_cmd->cmd != LC_SEGMENT_64) continue;
+
+        // run constructors
+        section_hdr = (struct section_64 *)(sizeof(struct segment_command_64) + (uintptr_t)seg_cmd);
+        for (index2 = 0; index2 < seg_cmd->nsects; index2++)
+        {
+            if ((section_hdr[index2].flags & SECTION_TYPE) != S_MOD_INIT_FUNC_POINTERS) continue;
+
+            for (section_offset = 0; section_offset < section_hdr[index2].size; section_offset += 8)
+            {
+                // run constructor
+                ((void (*)(void))*(uint64_t *)(library + section_hdr[index2].addr + section_offset) )();
+            }
+        }
+    }
+
+    return library;
+
+error1:
+    munmap(library, libsize);
+    return NULL;
 #else
     int fd, index, indrel, indsymb;
     off_t len;
@@ -1365,6 +2142,77 @@ void *find_symbol_32bit(void *library, const char *name)
     }
 
     return NULL;
+#elif defined(__APPLE__)
+    struct mach_header_64 *header;
+    struct symtab_command *symtab_cmd;
+    struct nlist_64 *symbol;
+    uint8_t *strings;
+    struct segment_command_64 *seg_cmd;
+    struct section_64 *section_hdr;
+    unsigned int index, index2, index3, index4, section_num;
+    const char *symbname;
+
+    if (library == NULL || name == NULL || *name == 0) return NULL;
+
+    header = (struct mach_header_64 *)library;
+
+    symtab_cmd = (struct symtab_command *)(sizeof(struct mach_header_64) + (uintptr_t)library);
+    for (index = 0; index < header->ncmds; index++, symtab_cmd = (struct symtab_command *)(symtab_cmd->cmdsize + (uintptr_t)symtab_cmd))
+    {
+        if (symtab_cmd->cmd != LC_SYMTAB) continue;
+
+        symbol = (struct nlist_64 *)get_file_address((uint8_t *)library, symtab_cmd->symoff);
+        strings = get_file_address((uint8_t *)library, symtab_cmd->stroff);
+        if (symbol == NULL || strings == NULL) return NULL;
+
+        for (index2 = 0; index2 < symtab_cmd->nsyms; index2++)
+        {
+            if (symbol[index2].n_un.n_strx == 0) continue;
+            if (symbol[index2].n_type & N_STAB) continue;
+            if (!(symbol[index2].n_type & N_EXT)) continue;
+
+            symbname = (const char *)(strings + symbol[index2].n_un.n_strx);
+
+            if (*symbname == '_' && 0 == strcmp(name, symbname + 1))
+            {
+                switch (symbol[index2].n_type & N_TYPE)
+                {
+                    case N_ABS:
+                        return (void *)(symbol[index2].n_value + (uintptr_t)library);
+                    case N_SECT:
+                        section_num = symbol[index2].n_sect;
+                        if (section_num != NO_SECT)
+                        {
+                            // find section by number
+                            seg_cmd = (struct segment_command_64 *)(sizeof(struct mach_header_64) + (uintptr_t)library);
+                            for (index3 = 0; index3 < header->ncmds; index3++, seg_cmd = (struct segment_command_64 *)(seg_cmd->cmdsize + (uintptr_t)seg_cmd))
+                            {
+                                if (seg_cmd->cmd != LC_SEGMENT_64) continue;
+
+                                section_hdr = (struct section_64 *)(sizeof(struct segment_command_64) + (uintptr_t)seg_cmd);
+                                for (index4 = 0; index4 < seg_cmd->nsects; index4++)
+                                {
+                                    section_num--;
+                                    if (section_num == 0)
+                                    {
+                                        if (symbol[index2].n_value >= section_hdr[index4].addr && symbol[index2].n_value < section_hdr[index4].addr + section_hdr[index4].size)
+                                        {
+                                            return (void *)(symbol[index2].n_value + (uintptr_t)library);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        return NULL;
+                    default:
+                        fprintf(stderr, "Error: unsupported symbol type\n");
+                        return NULL;
+                }
+            }
+        }
+    }
+
+    return NULL;
 #else
     Elf64_Ehdr *elf_header;
     Elf64_Phdr *program_header;
@@ -1500,6 +2348,58 @@ void unload_library_32bit(void *library)
     }
 
     VirtualFree(library, 0, MEM_RELEASE);
+#elif defined(__APPLE__)
+    struct mach_header_64 *header;
+    struct segment_command_64 *seg_cmd;
+    struct section_64 *section_hdr;
+    int64_t page_size;
+    uint64_t section_offset, min_addr, max_addr;
+    unsigned int index, index2;
+
+    if (library == NULL) return;
+
+    // get page size
+    page_size = sysconf(_SC_PAGESIZE);
+    if (page_size <= 0) page_size = 4096;
+
+    header = (struct mach_header_64 *)library;
+
+    // get minimum and maximum address for unloading and run destructors
+    max_addr = 0;
+    min_addr = (int64_t)-1;
+    seg_cmd = (struct segment_command_64 *)(sizeof(struct mach_header_64) + (uintptr_t)library);
+    for (index = 0; index < header->ncmds; index++, seg_cmd = (struct segment_command_64 *)(seg_cmd->cmdsize + (uintptr_t)seg_cmd))
+    {
+        if (seg_cmd->cmd != LC_SEGMENT_64) continue;
+
+        if (seg_cmd->vmaddr < min_addr)
+        {
+            min_addr = seg_cmd->vmaddr;
+        }
+        if (seg_cmd->vmaddr + seg_cmd->vmsize > max_addr)
+        {
+            max_addr = seg_cmd->vmaddr + seg_cmd->vmsize;
+        }
+
+        // run destructors
+        section_hdr = (struct section_64 *)(sizeof(struct segment_command_64) + (uintptr_t)seg_cmd);
+        for (index2 = 0; index2 < seg_cmd->nsects; index2++)
+        {
+            if ((section_hdr[index2].flags & SECTION_TYPE) != S_MOD_TERM_FUNC_POINTERS) continue;
+
+            for (section_offset = 0; section_offset < section_hdr[index2].size; section_offset += 8)
+            {
+                // run destructor
+                ((void (*)(void))*(uint64_t *)(section_hdr[index2].addr + section_offset + (uintptr_t)library) )();
+            }
+        }
+    }
+
+    // align minimum and maximum address to page size
+    min_addr = min_addr & ~(page_size - 1);
+    max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+
+    munmap(library, max_addr - min_addr);
 #else
     Elf64_Ehdr *elf_header;
     Elf64_Phdr *program_header;
