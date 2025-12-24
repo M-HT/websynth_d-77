@@ -21,6 +21,10 @@ The projects consists of following parts:
   * It requires the WebSynth D-77 datafile *dswebWDM.dat* (or *dswebsyn.dat*).
   * Compilation for x86/x64 requires [gcc](https://gcc.gnu.org/)/[clang](https://clang.llvm.org/) and [nasm](https://www.nasm.us/).
   * Compilation for other architectures requires [gcc](https://gcc.gnu.org/)/[clang](https://clang.llvm.org/), [llvm](https://llvm.org/) and [llasm](https://github.com/M-HT/SR/tree/master/llasm) (from [SR project](https://github.com/M-HT/SR)).
+* **d77_coredrv**
+  * MacOS daemon which provides Core MIDI synthesizer using *websynth*.
+  * It requires the WebSynth D-77 datafile *dswebWDM.dat* (or *dswebsyn.dat*).
+  * Compilation requires [Xcode](https://developer.apple.com/xcode/) Command Line Tools, [llvm](https://llvm.org/) and [llasm](https://github.com/M-HT/SR/tree/master/llasm) (from [SR project](https://github.com/M-HT/SR)).
 * **d77_pcmconvert**
   * Tool to convert [Standard MIDI File](https://www.midi.org/specifications-old/item/standard-midi-files-smf) to *PCM* (*WAV* or *RAW*) using *websynth*.
   * It requires the WebSynth D-77 datafile *dswebWDM.dat* (or *dswebsyn.dat*).

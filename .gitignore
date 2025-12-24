@@ -11,6 +11,8 @@
 *.EXP
 **/d77_alsadrv/d77_alsadrv
 **/d77_alsadrv/d77_lib.so
+**/d77_coredrv/d77_coredrv
+**/d77_coredrv/d77_lib.so
 **/d77_pcmconvert/d77_pcmconvert
 **/d77_pcmconvert/d77_lib.so
 **/websynth/llasm/indirect/d77_import.a

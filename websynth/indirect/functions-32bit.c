@@ -46,6 +46,7 @@
 #include <mach/mach_vm.h>
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
+#include <mach-o/fixup-chains.h>
 #include <sys/mman.h>
 #else
 #include <inttypes.h>
@@ -1010,6 +1011,15 @@ static int bind_address(uint64_t address, uint8_t type, uint64_t addend, const c
 
     if (symbol == NULL) return 0;
 
+    if (*symbol != '_')
+    {
+        // dyld_stub_binder is not needed, because lazy binding is not used (all symbols are binded immediatelly)
+        if (0 == strcmp(symbol, "dyld_stub_binder"))
+        {
+            return 1;
+        }
+    }
+
     if (flags != 0)
     {
         fprintf(stderr, "Error: unsupported bind flags\n");
@@ -1030,24 +1040,16 @@ static int bind_address(uint64_t address, uint8_t type, uint64_t addend, const c
         return 0;
     }
 
-    if (*symbol != '_')
-    {
-        // dyld_stub_binder is not needed, because lazy binding is not used (all symbols are binded immediatelly)
-        if (0 != strcmp(symbol, "dyld_stub_binder"))
-        {
-            fprintf(stderr, "Error: symbol not found: %s\n", symbol);
-            return 0;
-        }
-        return 1;
-    }
-
     symbvalue = NULL;
-    for (indsymb = 0; symbol_table_32bit[indsymb].name != NULL; indsymb++)
+    if (*symbol == '_')
     {
-        if (0 == strcmp(symbol + 1, symbol_table_32bit[indsymb].name))
+        for (indsymb = 0; symbol_table_32bit[indsymb].name != NULL; indsymb++)
         {
-            symbvalue = symbol_table_32bit[indsymb].value;
-            break;
+            if (0 == strcmp(symbol + 1, symbol_table_32bit[indsymb].name))
+            {
+                symbvalue = symbol_table_32bit[indsymb].value;
+                break;
+            }
         }
     }
 
@@ -1203,6 +1205,110 @@ static int bind_library_symbols(uint8_t *library, uint64_t bind_offset, uint64_t
                 return 0;
         }
     }
+}
+
+static int fixup_library_chains(uint8_t *library, uint64_t chained_fixups_offset)
+{
+    uint8_t *chained_fixups, *fixup_source;
+    struct dyld_chained_fixups_header *fixups_header;
+    struct dyld_chained_starts_in_image *starts_in_image;
+    struct dyld_chained_import *imports;
+    const char *symbols, *symbol;
+    struct dyld_chained_starts_in_segment *starts_in_segment;
+    unsigned int index1, index2, imports_index, page_offset, indsymb;
+    void *symbvalue;
+
+    chained_fixups = get_file_address(library, chained_fixups_offset);
+    if (chained_fixups == NULL) return 0;
+
+    fixups_header = (struct dyld_chained_fixups_header *)chained_fixups;
+
+    if (fixups_header->imports_count == 0) return 1;
+
+    if (fixups_header->fixups_version != 0)
+    {
+        fprintf(stderr, "Error: unsupported chained fixups version\n");
+        return 0;
+    }
+
+    if (fixups_header->imports_format != DYLD_CHAINED_IMPORT)
+    {
+        fprintf(stderr, "Error: unsupported chained fixups imports format\n");
+        return 0;
+    }
+
+    if (fixups_header->symbols_format != 0)
+    {
+        fprintf(stderr, "Error: unsupported chained fixups symbols format\n");
+        return 0;
+    }
+
+    starts_in_image = (struct dyld_chained_starts_in_image *)(chained_fixups + fixups_header->starts_offset);
+    imports = (struct dyld_chained_import *)(chained_fixups + fixups_header->imports_offset);
+    symbols = (const char *)(chained_fixups + fixups_header->symbols_offset);
+
+    imports_index = 0;
+    for (index1 = 0; index1 < starts_in_image->seg_count; index1++)
+    {
+        if (starts_in_image->seg_info_offset[index1] == 0) continue;
+
+        starts_in_segment = (struct dyld_chained_starts_in_segment *)(starts_in_image->seg_info_offset[index1] + (uintptr_t)starts_in_image);
+
+        if (starts_in_segment->pointer_format != DYLD_CHAINED_PTR_64_OFFSET)
+        {
+            fprintf(stderr, "Error: unsupported chained fixups pointer format\n");
+            return 0;
+        }
+
+        for (index2 = 0; index2 < starts_in_segment->page_count; index2++)
+        {
+            if (starts_in_segment->page_start[index2] == DYLD_CHAINED_PTR_START_NONE) continue;
+            if (starts_in_segment->page_start[index2] & DYLD_CHAINED_PTR_START_MULTI)
+            {
+                fprintf(stderr, "Error: unsupported chained fixups multiple starts per page\n");
+                return 0;
+            }
+
+            page_offset = starts_in_segment->page_start[index2];
+            while (page_offset < starts_in_segment->page_size)
+            {
+                if ((int8_t)imports[imports_index].lib_ordinal != BIND_SPECIAL_DYLIB_FLAT_LOOKUP)
+                {
+                    fprintf(stderr, "Error: unsupported chained fixups lib ordinal\n");
+                    return 0;
+                }
+
+                symbvalue = NULL;
+                symbol = symbols + imports[imports_index].name_offset;
+                if (*symbol == '_')
+                {
+                    for (indsymb = 0; symbol_table_32bit[indsymb].name != NULL; indsymb++)
+                    {
+                        if (0 == strcmp(symbol + 1, symbol_table_32bit[indsymb].name))
+                        {
+                            symbvalue = symbol_table_32bit[indsymb].value;
+                            break;
+                        }
+                    }
+                }
+
+                if (symbvalue == NULL)
+                {
+                    fprintf(stderr, "Error: symbol not found: %s\n", symbol);
+                    return 0;
+                }
+
+                fixup_source = library + starts_in_segment->segment_offset + index2 * starts_in_segment->page_size + page_offset;
+
+                *(uint64_t *)fixup_source = (uint64_t)symbvalue;
+                page_offset += 8;
+                imports_index++;
+                if (imports_index == fixups_header->imports_count) return 1;
+            }
+        }
+    }
+
+    return 1;
 }
 
 #else
@@ -1799,6 +1905,7 @@ error1:
     struct segment_command_64 *seg_cmd;
     struct section_64 *section_hdr;
     struct dyld_info_command *dyld_info_cmd;
+    struct linkedit_data_command *dyld_chained_fixups_cmd;
     struct symtab_command *symtab_cmd;
     struct dysymtab_command *dsymtab_cmd;
     struct load_command *load_cmd;
@@ -1841,10 +1948,9 @@ error1:
         goto error1;
     }
 
-    // unsupported: loading libraries
-
     // find commands and check for required commands
     dyld_info_cmd = NULL;
+    dyld_chained_fixups_cmd = NULL;
     symtab_cmd = NULL;
     dsymtab_cmd = NULL;
     load_cmd = (struct load_command *)(library + sizeof(struct mach_header_64));
@@ -1854,6 +1960,10 @@ error1:
         {
             dyld_info_cmd = (struct dyld_info_command *)load_cmd;
         }
+        else if (load_cmd->cmd == LC_DYLD_CHAINED_FIXUPS)
+        {
+            dyld_chained_fixups_cmd = (struct linkedit_data_command *)load_cmd;
+        }
         else if (load_cmd->cmd == LC_SYMTAB)
         {
             symtab_cmd = (struct symtab_command *)load_cmd;
@@ -1861,6 +1971,14 @@ error1:
         else if (load_cmd->cmd == LC_DYSYMTAB)
         {
             dsymtab_cmd = (struct dysymtab_command *)load_cmd;
+        }
+        else if (load_cmd->cmd == LC_DYLD_EXPORTS_TRIE)
+        {
+            // LC_SYMTAB is used for exported symbols
+        }
+        else if (load_cmd->cmd == LC_LOAD_DYLIB || load_cmd->cmd == LC_LOAD_WEAK_DYLIB || load_cmd->cmd == LC_REEXPORT_DYLIB)
+        {
+            // unsupported: loading libraries
         }
         else if ((load_cmd->cmd & LC_REQ_DYLD) || (load_cmd->cmd < LC_SEGMENT_64))
         {
@@ -1870,22 +1988,32 @@ error1:
     }
 
     // apply relocations and external symbols
-    if (dyld_info_cmd == NULL || symtab_cmd == NULL || dsymtab_cmd == NULL)
+    if ((dyld_info_cmd == NULL && dyld_chained_fixups_cmd == NULL) || symtab_cmd == NULL || dsymtab_cmd == NULL)
     {
         fprintf(stderr, "Error: missing commands\n");
         goto error1;
     }
-    if (dyld_info_cmd->rebase_size != 0)
+    if (dyld_chained_fixups_cmd != NULL)
     {
-        if (!rebase_library(library, dyld_info_cmd->rebase_off)) goto error1;
+        if (dyld_chained_fixups_cmd->datasize != 0)
+        {
+            if (!fixup_library_chains(library, dyld_chained_fixups_cmd->dataoff)) goto error1;
+        }
     }
-    if (dyld_info_cmd->bind_size != 0)
+    else
     {
-        if (!bind_library_symbols(library, dyld_info_cmd->bind_off, dyld_info_cmd->bind_size)) goto error1;
-    }
-    if (dyld_info_cmd->lazy_bind_size != 0)
-    {
-        if (!bind_library_symbols(library, dyld_info_cmd->lazy_bind_off, dyld_info_cmd->lazy_bind_size)) goto error1;
+        if (dyld_info_cmd->rebase_size != 0)
+        {
+            if (!rebase_library(library, dyld_info_cmd->rebase_off)) goto error1;
+        }
+        if (dyld_info_cmd->bind_size != 0)
+        {
+            if (!bind_library_symbols(library, dyld_info_cmd->bind_off, dyld_info_cmd->bind_size)) goto error1;
+        }
+        if (dyld_info_cmd->lazy_bind_size != 0)
+        {
+            if (!bind_library_symbols(library, dyld_info_cmd->lazy_bind_off, dyld_info_cmd->lazy_bind_size)) goto error1;
+        }
     }
 
     // make segments read-only
@@ -1912,12 +2040,21 @@ error1:
         section_hdr = (struct section_64 *)(sizeof(struct segment_command_64) + (uintptr_t)seg_cmd);
         for (index2 = 0; index2 < seg_cmd->nsects; index2++)
         {
-            if ((section_hdr[index2].flags & SECTION_TYPE) != S_MOD_INIT_FUNC_POINTERS) continue;
-
-            for (section_offset = 0; section_offset < section_hdr[index2].size; section_offset += 8)
+            if ((section_hdr[index2].flags & SECTION_TYPE) == S_MOD_INIT_FUNC_POINTERS)
             {
-                // run constructor
-                ((void (*)(void))*(uint64_t *)(library + section_hdr[index2].addr + section_offset) )();
+                for (section_offset = 0; section_offset < section_hdr[index2].size; section_offset += 8)
+                {
+                    // run constructor
+                    ((void (*)(void))*(uint64_t *)(library + section_hdr[index2].addr + section_offset) )();
+                }
+            }
+            else if ((section_hdr[index2].flags & SECTION_TYPE) == S_INIT_FUNC_OFFSETS)
+            {
+                for (section_offset = 0; section_offset < section_hdr[index2].size; section_offset += 4)
+                {
+                    // run constructor
+                    ((void (*)(void)) (library + seg_cmd->vmaddr + *(uint32_t *)(library + section_hdr[index2].addr + section_offset)) )();
+                }
             }
         }
     }
