@@ -1,6 +1,6 @@
 /**
  *
- *  Copyright (C) 2022-2025 Roman Pauer
+ *  Copyright (C) 2022-2026 Roman Pauer
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy of
  *  this software and associated documentation files (the "Software"), to deal in
@@ -71,7 +71,7 @@ static uint8_t *datafile_ptr;
 
 static unsigned int frequency, num_channels, bytes_per_call, samples_per_call, num_subbuffers, subbuf_counter;
 
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
 static uint8_t *midi_buffer;
 static uint32_t *event_buffer;
 #else
@@ -1271,7 +1271,7 @@ static int load_data_file(void)
         return -6;
     }
 
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     datafile_ptr = (uint8_t *)D77_AllocateMemory(datalen);
 #else
     datafile_ptr = (uint8_t *)malloc(datalen);
@@ -1298,7 +1298,7 @@ static int load_data_file(void)
 
     if (datalen)
     {
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
         D77_FreeMemory(datafile_ptr, datafile_len);
 #else
         free(datafile_ptr);
@@ -1312,10 +1312,12 @@ static int load_data_file(void)
 static void stop_synth(void) __attribute__((noinline));
 static void stop_synth(void)
 {
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     D77_FreeMemory(midi_buffer, 65536 + (32768 + 16384) * sizeof(uint32_t));
     D77_FreeMemory(datafile_ptr, datafile_len);
+#ifdef INDIRECT_64BIT
     D77_FreeLibrary();
+#endif
 #else
     free(datafile_ptr);
 #endif
@@ -1334,13 +1336,21 @@ static int start_synth(void)
     }
 #endif
 
+#ifdef PTROFS_64BIT
+    if (!D77_InitializePointerOffset())
+    {
+        fprintf(stderr, "Error initializing pointer offset\n");
+        return -1;
+    }
+#endif
+
     if (load_data_file() < 0)
     {
         fprintf(stderr, "Error opening DATA file: %s\n", data_filepath);
         return -2;
     }
 
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     midi_buffer = (uint8_t *)D77_AllocateMemory(65536 + (32768 + 16384) * sizeof(uint32_t));
     if (midi_buffer == NULL)
     {
@@ -1352,7 +1362,7 @@ static int start_synth(void)
 #endif
 
     // initialize D77
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     memcpy(event_buffer, &d77_settings, sizeof(D77_SETINGS));
     D77_ValidateSettings((D77_SETINGS *)event_buffer);
     memcpy(&d77_settings, event_buffer, sizeof(D77_SETINGS));
@@ -1415,7 +1425,7 @@ static int start_synth(void)
     event_read_index = 0;
     event_write_index = 0;
     subbuf_counter = 0;
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     memset(midi_buffer, 0, 65536);
 #endif
 
@@ -1556,7 +1566,7 @@ static int render_subbuffer(int num)
     }
 
     // render audio data
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     if (!D77_RenderSamples((int16_t *) &(midi_buffer[num * bytes_per_call])))
 #else
     if (!D77_RenderSamples((int16_t *) midi_queue_buffer[num]->mAudioData))
@@ -1575,7 +1585,7 @@ static void audio_callback_proc(void *inUserData, AudioQueueRef inAQ, AudioQueue
         fprintf(stderr, "Error rendering audio data\n");
     }
     midi_queue_buffer[subbuf_counter]->mAudioDataByteSize = bytes_per_call;
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     memcpy(midi_queue_buffer[subbuf_counter]->mAudioData, &(midi_buffer[subbuf_counter * bytes_per_call]), bytes_per_call);
 #endif
     AudioQueueEnqueueBuffer(midi_pcm_queue, midi_queue_buffer[subbuf_counter], 0, NULL);

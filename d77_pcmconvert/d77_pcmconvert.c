@@ -1,6 +1,6 @@
 /**
  *
- *  Copyright (C) 2022-2025 Roman Pauer
+ *  Copyright (C) 2022-2026 Roman Pauer
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy of
  *  this software and associated documentation files (the "Software"), to deal in
@@ -94,7 +94,7 @@ static midi_event_info *midi_events;
 static D77_SETINGS d77_settings;
 static D77_PARAMETERS *d77_parameters;
 
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
 static uint8_t *input_buffer;
 #else
 static D77_PARAMETERS d77_param_buffer;
@@ -228,7 +228,7 @@ static uint8_t *load_data_file(const char *datapath, int *length)
     }
 
 
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     mem = (uint8_t *)D77_AllocateMemory(datalen);
 #else
     mem = (uint8_t *)malloc(datalen);
@@ -241,7 +241,7 @@ static uint8_t *load_data_file(const char *datapath, int *length)
 
     if (fread(mem, 1, datalen, f) != (unsigned long)datalen)
     {
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
         D77_FreeMemory(mem, datalen);
 #else
         free(mem);
@@ -555,7 +555,17 @@ int main(int argc, char *argv[])
         fprintf(stderr, "error loading library\n");
         return 1;
     }
+#endif
 
+#ifdef PTROFS_64BIT
+    if (!D77_InitializePointerOffset())
+    {
+        fprintf(stderr, "error initializing pointer offset\n");
+        return 1;
+    }
+#endif
+
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     input_buffer = (uint8_t *)D77_AllocateMemory(65536);
     if (input_buffer == NULL)
     {
@@ -580,7 +590,7 @@ int main(int argc, char *argv[])
     }
 
 
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     memcpy(input_buffer, &d77_settings, sizeof(D77_SETINGS));
     D77_ValidateSettings((D77_SETINGS *)input_buffer);
     memcpy(&d77_settings, input_buffer, sizeof(D77_SETINGS));
@@ -605,7 +615,7 @@ int main(int argc, char *argv[])
     D77_InitializeEffect(D77_EFFECT_Chorus, d77_settings.dwChoSw ? 1 : 0);
     D77_InitializeCpuLoad(d77_settings.dwCpuLoadL, d77_settings.dwCpuLoadH);
 
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     d77_parameters = (D77_PARAMETERS *)input_buffer;
 #else
     d77_parameters = &d77_param_buffer;
@@ -626,7 +636,7 @@ int main(int argc, char *argv[])
     bytes_per_call = samples_per_call * 2 * sizeof(int16_t);
 
     // allocate output buffer
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     output_buffer = (int16_t *)D77_AllocateMemory(bytes_per_call);
 #else
     output_buffer = (int16_t *)malloc(bytes_per_call);
@@ -729,7 +739,7 @@ int main(int argc, char *argv[])
                     {
                         if (cur_event->data[0] == 0xf0)
                         {
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
                             memcpy(input_buffer, cur_event->data, cur_event->len);
                             D77_MidiMessageLong(input_buffer, cur_event->len);
 #else
@@ -746,7 +756,7 @@ int main(int argc, char *argv[])
                 {
                     if (cur_event->sysex[0] != 0xff) // skip meta events
                     {
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
                         if (cur_event->len <= 65536)
                         {
                             memcpy(input_buffer, cur_event->sysex, cur_event->len);
@@ -826,11 +836,13 @@ int main(int argc, char *argv[])
     }
 
     // free output buffer, MIDI file, DATA file
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     D77_FreeMemory(output_buffer, bytes_per_call);
     D77_FreeMemory(datafile_ptr, datafile_len);
     D77_FreeMemory(input_buffer, 65536);
+#ifdef INDIRECT_64BIT
     D77_FreeLibrary();
+#endif
 #else
     free(output_buffer);
     free(datafile_ptr);

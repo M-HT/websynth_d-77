@@ -1,6 +1,6 @@
 /**
  *
- *  Copyright (C) 2025 Roman Pauer
+ *  Copyright (C) 2025-2026 Roman Pauer
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy of
  *  this software and associated documentation files (the "Software"), to deal in
@@ -73,7 +73,13 @@ extern "C" {
 #ifdef INDIRECT_64BIT
 extern int D77_LoadLibrary(const char *libpath);
 extern void D77_FreeLibrary(void);
+#endif
 
+#ifdef PTROFS_64BIT
+extern int D77_InitializePointerOffset(void);
+#endif
+
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
 extern void *D77_AllocateMemory(unsigned int size);
 extern void D77_FreeMemory(void *mem, unsigned int size);
 #endif

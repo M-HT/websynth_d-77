@@ -1,6 +1,6 @@
 /**
  *
- *  Copyright (C) 2025 Roman Pauer
+ *  Copyright (C) 2025-2026 Roman Pauer
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy of
  *  this software and associated documentation files (the "Software"), to deal in
@@ -138,7 +138,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
     maddr = 1024*1024 + 65536;
 
     // round up starting memory address to the nearest multiple of the allocation granularity
-    maddr = (maddr + (sinfo.dwAllocationGranularity - 1)) & ~(sinfo.dwAllocationGranularity - 1);
+    maddr = (maddr + (sinfo.dwAllocationGranularity - 1)) & ~(uintptr_t)(sinfo.dwAllocationGranularity - 1);
 
     // look for unused memory below 2GB
     while (maddr < UINT64_C(0x80000000) && maddr + size <= UINT64_C(0x80000000))
@@ -147,7 +147,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
 
         if (minfo.State == MEM_FREE)
         {
-            reg_base = (((uintptr_t)minfo.BaseAddress) + (sinfo.dwAllocationGranularity - 1)) & ~(sinfo.dwAllocationGranularity - 1);
+            reg_base = (((uintptr_t)minfo.BaseAddress) + (sinfo.dwAllocationGranularity - 1)) & ~(uintptr_t)(sinfo.dwAllocationGranularity - 1);
             if (minfo.RegionSize >= reg_base - (uintptr_t)minfo.BaseAddress)
             {
                 reg_size = minfo.RegionSize - (reg_base - (uintptr_t)minfo.BaseAddress);
@@ -160,7 +160,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
             }
         }
 
-        maddr = ((minfo.RegionSize + (uintptr_t)minfo.BaseAddress) + (sinfo.dwAllocationGranularity - 1)) & ~(sinfo.dwAllocationGranularity - 1);
+        maddr = ((minfo.RegionSize + (uintptr_t)minfo.BaseAddress) + (sinfo.dwAllocationGranularity - 1)) & ~(uintptr_t)(sinfo.dwAllocationGranularity - 1);
     }
 
     return NULL;
@@ -244,7 +244,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
             }
 
             // try using memory at the end of the free region
-            start = (void *)((free_region_end - size) & ~(page_size - 1));
+            start = (void *)((free_region_end - size) & ~(uintptr_t)(page_size - 1));
             if (start != (void *)free_region_start)
             {
                 mem = mmap(start, size, prot, MAP_FIXED | flags, -1, 0);
@@ -313,7 +313,7 @@ error1:
     if (page_size <= 0) page_size = 4096;
 
     mem = NULL;
-    num0 = (1024*1024 + 65536 + (page_size - 1)) & ~(page_size - 1);
+    num0 = (1024*1024 + 65536 + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
     while (num0 < UINT64_C(0x80000000))
     {
         num_matches = fscanf(f, "%"SCNxMAX"%*[ -]%"SCNxMAX" %*[^\n^\r]%*[\n\r]", &num1, &num2);
@@ -342,7 +342,7 @@ error1:
             }
 
             // try using memory at the end of the block
-            start = (void *)((num1 - size) & ~(page_size - 1));
+            start = (void *)((num1 - size) & ~(uintptr_t)(page_size - 1));
             if (start != (void *)num0)
             {
                 mem = mmap(start, size, prot, MAP_FIXED_NOREPLACE | flags, -1, 0);
@@ -380,7 +380,7 @@ error1:
         }
 
         // try using memory at the end of 2GB
-        start = (void *)((UINT64_C(0x80000000) - size) & ~(page_size - 1));
+        start = (void *)((UINT64_C(0x80000000) - size) & ~(uintptr_t)(page_size - 1));
         if (start != (void *)num0)
         {
             mem = mmap(start, size, prot, MAP_FIXED_NOREPLACE | flags, -1, 0);
@@ -480,9 +480,9 @@ static uint8_t *load_library_from_memory_windows(uint8_t *mem)
     min_addr -= sizeof(IMAGE_NT_HEADERS64) + nt_headers->FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER);
 
     // round down minimum address to allocation granularity
-    min_addr = min_addr & ~(sinfo.dwAllocationGranularity - 1);
+    min_addr = min_addr & ~(uintptr_t)(sinfo.dwAllocationGranularity - 1);
     // round up maximum address to page boundary
-    max_addr = (max_addr + (sinfo.dwPageSize - 1)) & ~(sinfo.dwPageSize - 1);
+    max_addr = (max_addr + (sinfo.dwPageSize - 1)) & ~(uintptr_t)(sinfo.dwPageSize - 1);
 
     if (nt_headers->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size == 0)
     {
@@ -613,9 +613,9 @@ static uint8_t *load_library_from_file_windows(HANDLE file)
     min_addr -= sizeof(IMAGE_NT_HEADERS64) + nt_headers.FileHeader.NumberOfSections * sizeof(IMAGE_SECTION_HEADER);
 
     // round down minimum address to allocation granularity
-    min_addr = min_addr & ~(sinfo.dwAllocationGranularity - 1);
+    min_addr = min_addr & ~(uintptr_t)(sinfo.dwAllocationGranularity - 1);
     // round up maximum address to page boundary
-    max_addr = (max_addr + (sinfo.dwPageSize - 1)) & ~(sinfo.dwPageSize - 1);
+    max_addr = (max_addr + (sinfo.dwPageSize - 1)) & ~(uintptr_t)(sinfo.dwPageSize - 1);
 
     if (nt_headers.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size == 0)
     {
@@ -755,8 +755,8 @@ static uint8_t *load_library_from_file_macos(int fd, uint64_t *libsize)
     }
 
     // align minimum and maximum address to page size
-    min_addr = min_addr & ~(page_size - 1);
-    max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+    min_addr = min_addr & ~(uintptr_t)(page_size - 1);
+    max_addr = (max_addr + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
     if (min_addr != 0)
     {
@@ -775,7 +775,7 @@ static uint8_t *load_library_from_file_macos(int fd, uint64_t *libsize)
 
         page_offset = seg_cmd->vmaddr & (page_size - 1);
         start = base_addr + (seg_cmd->vmaddr - min_addr) - page_offset;
-        length = (page_offset + seg_cmd->vmsize + (page_size - 1)) & ~(page_size - 1);
+        length = (page_offset + seg_cmd->vmsize + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
         prot = PROT_NONE;
         if (seg_cmd->initprot & VM_PROT_EXECUTE) prot |= PROT_EXEC;
@@ -860,8 +860,8 @@ static uint8_t *load_library_from_memory_macos(int fd, uint8_t *mem, uint64_t *l
     }
 
     // align minimum and maximum address to page size
-    min_addr = min_addr & ~(page_size - 1);
-    max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+    min_addr = min_addr & ~(uintptr_t)(page_size - 1);
+    max_addr = (max_addr + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
     if (min_addr != 0)
     {
@@ -880,7 +880,7 @@ static uint8_t *load_library_from_memory_macos(int fd, uint8_t *mem, uint64_t *l
 
         page_offset = seg_cmd->vmaddr & (page_size - 1);
         start = base_addr + (seg_cmd->vmaddr - min_addr) - page_offset;
-        length = (page_offset + seg_cmd->vmsize + (page_size - 1)) & ~(page_size - 1);
+        length = (page_offset + seg_cmd->vmsize + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
         prot = PROT_NONE;
         if (seg_cmd->initprot & VM_PROT_EXECUTE) prot |= PROT_EXEC;
@@ -1395,8 +1395,8 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
     }
 
     // align minimum and maximum address to page size
-    min_addr = min_addr & ~(page_size - 1);
-    max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+    min_addr = min_addr & ~(uintptr_t)(page_size - 1);
+    max_addr = (max_addr + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
     if (elf_header.e_type == ET_EXEC)
     {
@@ -1446,7 +1446,7 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
 
         orig_max_addr = max_addr;
         max_addr += 4 * sizeof(uint64_t) + sym_size + str_size;
-        max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+        max_addr = (max_addr + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
         base_addr = (uint8_t *) reserve_address_space(min_addr, max_addr - min_addr);
         if (base_addr == NULL) goto error2;
@@ -1489,7 +1489,7 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
 
         page_offset = program_header->p_vaddr & (page_size - 1);
         start = base_addr + (program_header->p_vaddr - min_addr) - page_offset;
-        length = (page_offset + program_header->p_memsz + (page_size - 1)) & ~(page_size - 1);
+        length = (page_offset + program_header->p_memsz + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
         prot = PROT_NONE;
         if (program_header->p_flags & PF_X) prot |= PROT_EXEC;
@@ -1582,8 +1582,8 @@ static uint8_t *load_library_from_memory_linux(int fd, uint8_t *mem, uint64_t *l
     }
 
     // align minimum and maximum address to page size
-    min_addr = min_addr & ~(page_size - 1);
-    max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+    min_addr = min_addr & ~(uintptr_t)(page_size - 1);
+    max_addr = (max_addr + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
     if (elf_header->e_type == ET_EXEC)
     {
@@ -1619,7 +1619,7 @@ static uint8_t *load_library_from_memory_linux(int fd, uint8_t *mem, uint64_t *l
 
         orig_max_addr = max_addr;
         max_addr += 4 * sizeof(uint64_t) + sym_size + str_size;
-        max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+        max_addr = (max_addr + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
         base_addr = (uint8_t *) reserve_address_space(min_addr, max_addr - min_addr);
         if (base_addr == NULL) goto error1;
@@ -1658,7 +1658,7 @@ static uint8_t *load_library_from_memory_linux(int fd, uint8_t *mem, uint64_t *l
 
         page_offset = program_header->p_vaddr & (page_size - 1);
         start = base_addr + (program_header->p_vaddr - min_addr) - page_offset;
-        length = (page_offset + program_header->p_memsz + (page_size - 1)) & ~(page_size - 1);
+        length = (page_offset + program_header->p_memsz + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
         prot = PROT_NONE;
         if (program_header->p_flags & PF_X) prot |= PROT_EXEC;
@@ -2389,7 +2389,7 @@ void *find_symbol_32bit(void *library, const char *name)
         }
 
         // align maximum address to page size
-        max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+        max_addr = (max_addr + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
         symtab = ((uint64_t *)max_addr)[0];
         syment = ((uint64_t *)max_addr)[1];
@@ -2535,8 +2535,8 @@ void unload_library_32bit(void *library)
     }
 
     // align minimum and maximum address to page size
-    min_addr = min_addr & ~(page_size - 1);
-    max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+    min_addr = min_addr & ~(uintptr_t)(page_size - 1);
+    max_addr = (max_addr + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
     munmap(library, max_addr - min_addr);
 #else
@@ -2620,8 +2620,8 @@ void unload_library_32bit(void *library)
     }
 
     // align minimum and maximum address to page size
-    min_addr = min_addr & ~(page_size - 1);
-    max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+    min_addr = min_addr & ~(uintptr_t)(page_size - 1);
+    max_addr = (max_addr + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
 
     if (elf_header->e_type == ET_EXEC)
     {
@@ -2631,7 +2631,7 @@ void unload_library_32bit(void *library)
         strsz = ((uint64_t *)max_addr)[3];
 
         max_addr = strtab + strsz;
-        max_addr = (max_addr + (page_size - 1)) & ~(page_size - 1);
+        max_addr = (max_addr + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
     }
 
     munmap(library, max_addr - min_addr);

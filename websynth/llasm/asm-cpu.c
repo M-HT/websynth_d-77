@@ -1,6 +1,6 @@
 /**
  *
- *  Copyright (C) 2019-2025 Roman Pauer
+ *  Copyright (C) 2019-2026 Roman Pauer
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy of
  *  this software and associated documentation files (the "Software"), to deal in
@@ -24,7 +24,7 @@
 
 #include "llasm_cpu.h"
 #include <stdlib.h>
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
 #include "functions-32bit.h"
 #endif
 
@@ -46,6 +46,10 @@ static __declspec(thread) _cpu *thread_cpu = NULL;
 extern uint32_t X86_InterruptFlag;
 #endif
 
+#ifdef PTROFS_64BIT
+extern uint64_t pointer_offset;
+#endif
+
 EXTERNC _cpu *x86_initialize_cpu(void)
 {
     _cpu *cpu;
@@ -54,7 +58,7 @@ EXTERNC _cpu *x86_initialize_cpu(void)
     cpu = thread_cpu;
     if (cpu != NULL) return cpu;
 
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
     stack_bottom = map_memory_32bit(1024 * 1024, 0);
 #else
     stack_bottom = malloc(1024 * 1024);
@@ -69,7 +73,13 @@ EXTERNC _cpu *x86_initialize_cpu(void)
     cpu->_st_sw_cond = 0;
     cpu->_st_cw = 0x037f;
 
-    esp = (uint32_t)(uintptr_t)cpu->stack_top;
+#ifdef PTROFS_64BIT
+    cpu->_pointer_offset = pointer_offset;
+#else
+    cpu->_reserved1 = 0;
+#endif
+
+    esp = PTR2REG(cpu->stack_top);
     eflags = 0x3202;
 #ifndef INDIRECT_64BIT
     X86_InterruptFlag = 1;
@@ -91,7 +101,7 @@ EXTERNC void x86_deinitialize_cpu(void)
     {
         stack_bottom = cpu->stack_bottom;
         cpu->stack_bottom = NULL;
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
         unmap_memory_32bit(stack_bottom, 1024 * 1024);
 #else
         free(stack_bottom);

@@ -29,12 +29,10 @@
 extern "C" {
 #endif
 
+int initialize_pointer_offset(void);
+
 void *map_memory_32bit(unsigned int size, int only_address_space);
 void unmap_memory_32bit(void *mem, unsigned int size);
-
-void *load_library_32bit(const char *libpath);
-void *find_symbol_32bit(void *library, const char *name);
-void unload_library_32bit(void *library);
 
 #ifdef __cplusplus
 }

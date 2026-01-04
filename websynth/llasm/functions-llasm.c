@@ -1,6 +1,6 @@
 /**
  *
- *  Copyright (C) 2025 Roman Pauer
+ *  Copyright (C) 2025-2026 Roman Pauer
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy of
  *  this software and associated documentation files (the "Software"), to deal in
@@ -23,7 +23,7 @@
  */
 
 #include "llasm_cpu.h"
-#ifdef INDIRECT_64BIT
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
 #include "functions-32bit.h"
 #include <stdlib.h>
 #endif
@@ -135,6 +135,24 @@ EXTERNC void D77_FreeLibrary(void)
     }
 }
 
+#define CHECK_LIBRARY { if (library == NULL) exit(3); }
+
+#else
+
+#define CHECK_LIBRARY
+
+#endif
+
+#ifdef PTROFS_64BIT
+
+EXTERNC int D77_InitializePointerOffset(void)
+{
+    return !initialize_pointer_offset();
+}
+
+#endif
+
+#if defined(INDIRECT_64BIT) || defined(PTROFS_64BIT)
 
 EXTERNC void *D77_AllocateMemory(unsigned int size)
 {
@@ -145,12 +163,6 @@ EXTERNC void D77_FreeMemory(void *mem, unsigned int size)
 {
     unmap_memory_32bit(mem, size);
 }
-
-#define CHECK_LIBRARY { if (library == NULL) exit(3); }
-
-#else
-
-#define CHECK_LIBRARY
 
 #endif
 
@@ -164,7 +176,7 @@ EXTERNC void D77_ValidateSettings(void *lpSettings)
     cpu = x86_initialize_cpu();
 
     // __fastcall
-    ecx = (uint32_t)(uintptr_t)lpSettings;
+    ecx = PTR2REG(lpSettings);
 
     c_ValidateSettings_asm(cpu);
 }
@@ -178,7 +190,7 @@ EXTERNC uint32_t D77_InitializeDataFile(uint8_t *lpDataFile, uint32_t dwLength)
     cpu = x86_initialize_cpu();
 
     // __fastcall
-    ecx = (uint32_t)(uintptr_t)lpDataFile;
+    ecx = PTR2REG(lpDataFile);
     edx = dwLength;
 
     c_InitializeDataFile_asm(cpu);
@@ -259,7 +271,7 @@ EXTERNC void D77_InitializeParameters(const void *lpParameters)
     cpu = x86_initialize_cpu();
 
     // __fastcall
-    ecx = (uint32_t)(uintptr_t)lpParameters;
+    ecx = PTR2REG(lpParameters);
 
     c_InitializeParameters_asm(cpu);
 }
@@ -318,7 +330,7 @@ EXTERNC uint32_t D77_MidiMessageLong(const uint8_t *lpMessage, uint32_t dwLength
     cpu = x86_initialize_cpu();
 
     // __fastcall
-    ecx = (uint32_t)(uintptr_t)lpMessage;
+    ecx = PTR2REG(lpMessage);
     edx = dwLength;
 
     // MidiMessageLong_asm has a third (unused) parameter (uint8_t dwMidiPort)
@@ -340,7 +352,7 @@ EXTERNC uint32_t D77_RenderSamples(int16_t *lpSamples)
     cpu = x86_initialize_cpu();
 
     // __fastcall
-    ecx = (uint32_t)(uintptr_t)lpSamples;
+    ecx = PTR2REG(lpSamples);
 
     c_RenderSamples_asm(cpu);
 
