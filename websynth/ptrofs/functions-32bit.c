@@ -146,7 +146,7 @@ int initialize_pointer_offset(void)
     mach_port_t task;
     mach_vm_address_t region_address, maddr, free_offset;
     mach_vm_size_t region_size, min_length;
-    vm_region_basic_info_data_t rinfo;
+    vm_region_basic_info_data_64_t rinfo;
     mach_msg_type_number_t count;
     mach_port_t object_name;
 
@@ -184,7 +184,7 @@ int initialize_pointer_offset(void)
     {
         region_address = maddr;
         count = VM_REGION_BASIC_INFO_COUNT_64;
-        if (KERN_SUCCESS != mach_vm_region(task, &region_address, &region_size, VM_REGION_BASIC_INFO, (vm_region_info_t) &rinfo, &count, &object_name)) break;
+        if (KERN_SUCCESS != mach_vm_region(task, &region_address, &region_size, VM_REGION_BASIC_INFO_64, (vm_region_info_t) &rinfo, &count, &object_name)) break;
 
         if (region_address - maddr >= min_length)
         {
@@ -373,7 +373,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
     mach_port_t task;
     mach_vm_address_t region_address, free_region_start, free_region_end;
     mach_vm_size_t region_size;
-    vm_region_basic_info_data_t info;
+    vm_region_basic_info_data_64_t info;
     mach_msg_type_number_t count;
     mach_port_t object_name;
 
@@ -390,7 +390,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
 
     region_address = pointer_offset;
     count = VM_REGION_BASIC_INFO_COUNT_64;
-    if (KERN_SUCCESS != mach_vm_region(task, &region_address, &region_size, VM_REGION_BASIC_INFO, (vm_region_info_t) &info, &count, &object_name)) return NULL;
+    if (KERN_SUCCESS != mach_vm_region(task, &region_address, &region_size, VM_REGION_BASIC_INFO_64, (vm_region_info_t) &info, &count, &object_name)) return NULL;
 
     // first free region (starting at address zero) belongs to segment __PAGEZERO, so don't try using memory here
 
@@ -401,7 +401,7 @@ void *map_memory_32bit(unsigned int size, int only_address_space)
     {
         region_address = free_region_start;
         count = VM_REGION_BASIC_INFO_COUNT_64;
-        if (KERN_SUCCESS != mach_vm_region(task, &region_address, &region_size, VM_REGION_BASIC_INFO, (vm_region_info_t) &info, &count, &object_name))
+        if (KERN_SUCCESS != mach_vm_region(task, &region_address, &region_size, VM_REGION_BASIC_INFO_64, (vm_region_info_t) &info, &count, &object_name))
         {
             region_address = free_region_end = pointer_offset + UINT64_C(0x80000000);
             region_size = 0;
