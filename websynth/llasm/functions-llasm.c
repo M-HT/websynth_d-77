@@ -32,21 +32,21 @@
 #ifdef INDIRECT_64BIT
 static void *library = NULL;
 
-static void (*c_ValidateSettings_asm)(CPU);
-static void (*c_InitializeDataFile_asm)(CPU);
-static void (*c_InitializeSynth_asm)(CPU);
-static void (*c_InitializeUnknown_asm)(CPU);
-static void (*c_InitializeEffect_asm)(CPU);
-static void (*c_InitializeCpuLoad_asm)(CPU);
-static void (*c_InitializeParameters_asm)(CPU);
-static void (*c_InitializeMasterVolume_asm)(CPU);
+static void (CCALL * c_ValidateSettings_asm)(CPU);
+static void (CCALL * c_InitializeDataFile_asm)(CPU);
+static void (CCALL * c_InitializeSynth_asm)(CPU);
+static void (CCALL * c_InitializeUnknown_asm)(CPU);
+static void (CCALL * c_InitializeEffect_asm)(CPU);
+static void (CCALL * c_InitializeCpuLoad_asm)(CPU);
+static void (CCALL * c_InitializeParameters_asm)(CPU);
+static void (CCALL * c_InitializeMasterVolume_asm)(CPU);
 
 static uint32_t *dwRenderedSamplesPerCall_asm;
 
-static void (*c_MidiMessageShort_asm)(CPU);
-static void (*c_MidiMessageLong_asm)(CPU);
+static void (CCALL * c_MidiMessageShort_asm)(CPU);
+static void (CCALL * c_MidiMessageLong_asm)(CPU);
 
-static void (*c_RenderSamples_asm)(CPU);
+static void (CCALL * c_RenderSamples_asm)(CPU);
 #endif
 
 
@@ -58,21 +58,21 @@ extern _cpu *x86_initialize_cpu(void);
 extern void x86_deinitialize_cpu(void);
 
 #ifndef INDIRECT_64BIT
-extern void c_ValidateSettings_asm(CPU);
-extern void c_InitializeDataFile_asm(CPU);
-extern void c_InitializeSynth_asm(CPU);
-extern void c_InitializeUnknown_asm(CPU);
-extern void c_InitializeEffect_asm(CPU);
-extern void c_InitializeCpuLoad_asm(CPU);
-extern void c_InitializeParameters_asm(CPU);
-extern void c_InitializeMasterVolume_asm(CPU);
+extern void CCALL c_ValidateSettings_asm(CPU);
+extern void CCALL c_InitializeDataFile_asm(CPU);
+extern void CCALL c_InitializeSynth_asm(CPU);
+extern void CCALL c_InitializeUnknown_asm(CPU);
+extern void CCALL c_InitializeEffect_asm(CPU);
+extern void CCALL c_InitializeCpuLoad_asm(CPU);
+extern void CCALL c_InitializeParameters_asm(CPU);
+extern void CCALL c_InitializeMasterVolume_asm(CPU);
 
 extern uint32_t dwRenderedSamplesPerCall_asm;
 
-extern void c_MidiMessageShort_asm(CPU);
-extern void c_MidiMessageLong_asm(CPU);
+extern void CCALL c_MidiMessageShort_asm(CPU);
+extern void CCALL c_MidiMessageLong_asm(CPU);
 
-extern void c_RenderSamples_asm(CPU);
+extern void CCALL c_RenderSamples_asm(CPU);
 #endif
 
 #ifdef __cplusplus
@@ -88,21 +88,21 @@ EXTERNC int D77_LoadLibrary(const char *libpath)
     library = load_library_32bit(libpath);
     if (library == NULL) return 0;
 
-    c_ValidateSettings_asm = (void (*)(CPU))find_symbol_32bit(library, "c_ValidateSettings_asm");
-    c_InitializeDataFile_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeDataFile_asm");
-    c_InitializeSynth_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeSynth_asm");
-    c_InitializeUnknown_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeUnknown_asm");
-    c_InitializeEffect_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeEffect_asm");
-    c_InitializeCpuLoad_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeCpuLoad_asm");
-    c_InitializeParameters_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeParameters_asm");
-    c_InitializeMasterVolume_asm = (void (*)(CPU))find_symbol_32bit(library, "c_InitializeMasterVolume_asm");
+    c_ValidateSettings_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_ValidateSettings_asm");
+    c_InitializeDataFile_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_InitializeDataFile_asm");
+    c_InitializeSynth_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_InitializeSynth_asm");
+    c_InitializeUnknown_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_InitializeUnknown_asm");
+    c_InitializeEffect_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_InitializeEffect_asm");
+    c_InitializeCpuLoad_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_InitializeCpuLoad_asm");
+    c_InitializeParameters_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_InitializeParameters_asm");
+    c_InitializeMasterVolume_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_InitializeMasterVolume_asm");
 
     dwRenderedSamplesPerCall_asm = (uint32_t *)find_symbol_32bit(library, "dwRenderedSamplesPerCall_asm");
 
-    c_MidiMessageShort_asm = (void (*)(CPU))find_symbol_32bit(library, "c_MidiMessageShort_asm");
-    c_MidiMessageLong_asm = (void (*)(CPU))find_symbol_32bit(library, "c_MidiMessageLong_asm");
+    c_MidiMessageShort_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_MidiMessageShort_asm");
+    c_MidiMessageLong_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_MidiMessageLong_asm");
 
-    c_RenderSamples_asm = (void (*)(CPU))find_symbol_32bit(library, "c_RenderSamples_asm");
+    c_RenderSamples_asm = (void (CCALL *)(CPU))find_symbol_32bit(library, "c_RenderSamples_asm");
 
     if ((c_ValidateSettings_asm == NULL) ||
         (c_InitializeDataFile_asm == NULL) ||
@@ -167,7 +167,7 @@ EXTERNC void D77_FreeMemory(void *mem, unsigned int size)
 #endif
 
 
-EXTERNC void D77_ValidateSettings(void *lpSettings)
+EXTERNC void CCALL D77_ValidateSettings(void *lpSettings)
 {
     _cpu *cpu;
 
@@ -181,7 +181,7 @@ EXTERNC void D77_ValidateSettings(void *lpSettings)
     c_ValidateSettings_asm(cpu);
 }
 
-EXTERNC uint32_t D77_InitializeDataFile(uint8_t *lpDataFile, uint32_t dwLength)
+EXTERNC uint32_t CCALL D77_InitializeDataFile(uint8_t *lpDataFile, uint32_t dwLength)
 {
     _cpu *cpu;
 
@@ -198,7 +198,7 @@ EXTERNC uint32_t D77_InitializeDataFile(uint8_t *lpDataFile, uint32_t dwLength)
     return eax;
 }
 
-EXTERNC uint32_t D77_InitializeSynth(uint32_t dwSamplingFrequency, uint32_t dwPolyphony, uint32_t dwTimeReso_unused)
+EXTERNC uint32_t CCALL D77_InitializeSynth(uint32_t dwSamplingFrequency, uint32_t dwPolyphony, uint32_t dwTimeReso_unused)
 {
     _cpu *cpu;
 
@@ -218,7 +218,7 @@ EXTERNC uint32_t D77_InitializeSynth(uint32_t dwSamplingFrequency, uint32_t dwPo
     return eax;
 }
 
-EXTERNC void D77_InitializeUnknown(uint32_t dwUnknown_unused)
+EXTERNC void CCALL D77_InitializeUnknown(uint32_t dwUnknown_unused)
 {
     _cpu *cpu;
 
@@ -232,7 +232,7 @@ EXTERNC void D77_InitializeUnknown(uint32_t dwUnknown_unused)
     c_InitializeUnknown_asm(cpu);
 }
 
-EXTERNC void D77_InitializeEffect(uint32_t dwEffect, uint32_t bEnabled)
+EXTERNC void CCALL D77_InitializeEffect(uint32_t dwEffect, uint32_t bEnabled)
 {
     _cpu *cpu;
 
@@ -247,7 +247,7 @@ EXTERNC void D77_InitializeEffect(uint32_t dwEffect, uint32_t bEnabled)
     c_InitializeEffect_asm(cpu);
 }
 
-EXTERNC void D77_InitializeCpuLoad(uint32_t dwCpuLoadLow, uint32_t dwCpuLoadHigh)
+EXTERNC void CCALL D77_InitializeCpuLoad(uint32_t dwCpuLoadLow, uint32_t dwCpuLoadHigh)
 {
     _cpu *cpu;
 
@@ -262,7 +262,7 @@ EXTERNC void D77_InitializeCpuLoad(uint32_t dwCpuLoadLow, uint32_t dwCpuLoadHigh
     c_InitializeCpuLoad_asm(cpu);
 }
 
-EXTERNC void D77_InitializeParameters(const void *lpParameters)
+EXTERNC void CCALL D77_InitializeParameters(const void *lpParameters)
 {
     _cpu *cpu;
 
@@ -276,7 +276,7 @@ EXTERNC void D77_InitializeParameters(const void *lpParameters)
     c_InitializeParameters_asm(cpu);
 }
 
-EXTERNC void D77_InitializeMasterVolume(uint32_t dwMasterVolume)
+EXTERNC void CCALL D77_InitializeMasterVolume(uint32_t dwMasterVolume)
 {
     _cpu *cpu;
 
@@ -291,7 +291,7 @@ EXTERNC void D77_InitializeMasterVolume(uint32_t dwMasterVolume)
 }
 
 
-EXTERNC uint32_t D77_GetRenderedSamplesPerCall(void)
+EXTERNC uint32_t CCALL D77_GetRenderedSamplesPerCall(void)
 {
 #ifdef INDIRECT_64BIT
     CHECK_LIBRARY
@@ -303,7 +303,7 @@ EXTERNC uint32_t D77_GetRenderedSamplesPerCall(void)
 }
 
 
-EXTERNC uint32_t D77_MidiMessageShort(uint32_t dwMessage)
+EXTERNC uint32_t CCALL D77_MidiMessageShort(uint32_t dwMessage)
 {
     _cpu *cpu;
 
@@ -321,7 +321,7 @@ EXTERNC uint32_t D77_MidiMessageShort(uint32_t dwMessage)
     return eax;
 }
 
-EXTERNC uint32_t D77_MidiMessageLong(const uint8_t *lpMessage, uint32_t dwLength)
+EXTERNC uint32_t CCALL D77_MidiMessageLong(const uint8_t *lpMessage, uint32_t dwLength)
 {
     _cpu *cpu;
 
@@ -343,7 +343,7 @@ EXTERNC uint32_t D77_MidiMessageLong(const uint8_t *lpMessage, uint32_t dwLength
 }
 
 
-EXTERNC uint32_t D77_RenderSamples(int16_t *lpSamples)
+EXTERNC uint32_t CCALL D77_RenderSamples(int16_t *lpSamples)
 {
     _cpu *cpu;
 

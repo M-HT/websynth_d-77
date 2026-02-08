@@ -27,6 +27,14 @@
 
 #include <stdint.h>
 
+#if defined(__GNUC__) && (defined(__i386) || (defined(__x86_64) && defined(_WIN32)))
+    #define CCALL __attribute__ ((__cdecl__))
+#elif defined(_MSC_VER)
+    #define CCALL __cdecl
+#else
+    #define CCALL
+#endif
+
 #pragma pack(4)
 typedef struct
 {
@@ -84,21 +92,21 @@ extern void *D77_AllocateMemory(unsigned int size);
 extern void D77_FreeMemory(void *mem, unsigned int size);
 #endif
 
-extern void D77_ValidateSettings(D77_SETINGS *lpSettings);
-extern uint32_t D77_InitializeDataFile(uint8_t *lpDataFile, uint32_t dwLength);
-extern uint32_t D77_InitializeSynth(uint32_t dwSamplingFrequency, uint32_t dwPolyphony, uint32_t dwTimeReso_unused);
-extern void D77_InitializeUnknown(uint32_t dwUnknown_unused);
-extern void D77_InitializeEffect(enum D77_EFFECT dwEffect, uint32_t bEnabled);
-extern void D77_InitializeCpuLoad(uint32_t dwCpuLoadLow, uint32_t dwCpuLoadHigh);
-extern void D77_InitializeParameters(const D77_PARAMETERS *lpParameters);
-extern void D77_InitializeMasterVolume(uint32_t dwMasterVolume);
+extern void CCALL D77_ValidateSettings(D77_SETINGS *lpSettings);
+extern uint32_t CCALL D77_InitializeDataFile(uint8_t *lpDataFile, uint32_t dwLength);
+extern uint32_t CCALL D77_InitializeSynth(uint32_t dwSamplingFrequency, uint32_t dwPolyphony, uint32_t dwTimeReso_unused);
+extern void CCALL D77_InitializeUnknown(uint32_t dwUnknown_unused);
+extern void CCALL D77_InitializeEffect(enum D77_EFFECT dwEffect, uint32_t bEnabled);
+extern void CCALL D77_InitializeCpuLoad(uint32_t dwCpuLoadLow, uint32_t dwCpuLoadHigh);
+extern void CCALL D77_InitializeParameters(const D77_PARAMETERS *lpParameters);
+extern void CCALL D77_InitializeMasterVolume(uint32_t dwMasterVolume);
 
-extern uint32_t D77_GetRenderedSamplesPerCall(void);
+extern uint32_t CCALL D77_GetRenderedSamplesPerCall(void);
 
-extern uint32_t D77_MidiMessageShort(uint32_t dwMessage);
-extern uint32_t D77_MidiMessageLong(const uint8_t *lpMessage, uint32_t dwLength);
+extern uint32_t CCALL D77_MidiMessageShort(uint32_t dwMessage);
+extern uint32_t CCALL D77_MidiMessageLong(const uint8_t *lpMessage, uint32_t dwLength);
 
-extern uint32_t D77_RenderSamples(int16_t *lpSamples);
+extern uint32_t CCALL D77_RenderSamples(int16_t *lpSamples);
 
 #ifdef __cplusplus
 }

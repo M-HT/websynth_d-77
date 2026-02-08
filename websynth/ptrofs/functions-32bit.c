@@ -52,8 +52,16 @@
 
 #include "functions-32bit.h"
 
+#if defined(__GNUC__) && (defined(__i386) || (defined(__x86_64) && defined(_WIN32)))
+    #define CCALL __attribute__ ((__cdecl__))
+#elif defined(_MSC_VER)
+    #define CCALL __cdecl
+#else
+    #define CCALL
+#endif
 
-extern void (*ptr_initialize_pointers)(uint64_t pointer_offset);
+
+extern void (CCALL * ptr_initialize_pointers)(uint64_t pointer_offset);
 
 uint64_t pointer_offset;
 unsigned int pointer_reserved_length;

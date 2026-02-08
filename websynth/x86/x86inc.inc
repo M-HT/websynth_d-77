@@ -1,7 +1,7 @@
 ;part of static recompiler -- do not edit
 
 ;;
-;;  Copyright (C) 2019 Roman Pauer
+;;  Copyright (C) 2019-2026 Roman Pauer
 ;;
 ;;  Permission is hereby granted, free of charge, to any person obtaining a copy of
 ;;  this software and associated documentation files (the "Software"), to deal in
@@ -22,5 +22,5 @@
 ;;  SOFTWARE.
 ;;
 
-extern x86_read_fs_dword
-extern x86_write_fs_dword
+;extern x86_read_fs_dword
+;extern x86_write_fs_dword
