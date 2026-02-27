@@ -2490,7 +2490,12 @@ mov eax, [ecx+0x28]
 ;push ebx
 ;push ebp
 PUSH32 ebx, ebp
-xor bl, bl
+lea ebx, [ecx+edx]
+cmp eax, ebx
+jne short loc_4056CE_1
+sub eax, ecx
+loc_4056CE_1:
+xor bl, bl ; check if the datafile was already initialized (in another instance)
 ;push esi
 PUSH32 esi
 cmp edx, eax
@@ -2508,6 +2513,8 @@ loc_4056FE:
 mov esi, [ecx+0x34]
 mov ebp, [ecx+0x2c]
 mov edi, [ecx+0x30]
+cmp eax, [ecx+0x28]
+jne loc_4058CC ; check if the datafile was already initialized (in another instance)
 add esi, ecx
 add eax, ecx
 add ebp, ecx

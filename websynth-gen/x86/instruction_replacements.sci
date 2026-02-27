@@ -15,3 +15,6 @@ loc_40B16E,5,align 16
 loc_40B2AE,5,align 16
 loc_40B3EE,5,align 16
 loc_40DA98,3,align 16
+
+loc_4056CE,2,lea ebx, [ecx+edx]|cmp eax, ebx|jne short loc_4056CE_1|sub eax, ecx|loc_4056CE_1:|xor bl, bl ; check if the datafile was already initialized (in another instance)
+loc_405704,3,mov edi, [ecx+0x30]|cmp eax, [ecx+0x28]|jne loc_4058CC ; check if the datafile was already initialized (in another instance)

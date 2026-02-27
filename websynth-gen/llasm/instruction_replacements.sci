@@ -15,3 +15,6 @@ loc_40B16E,5,;
 loc_40B2AE,5,;
 loc_40B3EE,5,;
 loc_40DA98,3,;
+
+loc_4056CE,2,;xor bl, bl|add tmp1, ecx, edx|sub tmp2, eax, ecx|cmoveq eax, tmp1, eax, tmp2, eax|mov ebx, 0 ; check if the datafile was already initialized (in another instance)
+loc_405704,3,;mov edi, [ecx+0x30]|add tmpadr, ecx, 48|load edi, tmpadr, 1|add tmpadr, ecx, 40|load tmp1, tmpadr, 1|sub tmp1, tmp1, eax|ctcallnz tmp1, loc_4058CC|tcall loc_405704_1|endp|proc loc_405704_1 ; check if the datafile was already initialized (in another instance)
