@@ -778,7 +778,7 @@ static void midi_receive_proc(const MIDIEventList *evtlist, void * __nullable sr
                         {
                             for (index3 = 0; index3 < num_data_packets; index3++)
                             {
-                                if (((packet->words[index2 + index3 * 2] >> 20) & 0x0f) == kMIDISysExStatusComplete || ((packet->words[index2 * 2] >> 20) & 0x0f) == kMIDISysExStatusStart)
+                                if (((packet->words[index2 + index3 * 2] >> 20) & 0x0f) == kMIDISysExStatusComplete || ((packet->words[index2 + index3 * 2] >> 20) & 0x0f) == kMIDISysExStatusStart)
                                 {
                                     *data = 0xf0;
                                     data++;
@@ -811,7 +811,7 @@ static void midi_receive_proc(const MIDIEventList *evtlist, void * __nullable sr
 
                                 data += (packet->words[index2 + index3 * 2] >> 16) & 0x0f;
 
-                                if (((packet->words[index2 + index3 * 2] >> 20) & 0x0f) == kMIDISysExStatusComplete || ((packet->words[index2 * 2] >> 20) & 0x0f) == kMIDISysExStatusEnd)
+                                if (((packet->words[index2 + index3 * 2] >> 20) & 0x0f) == kMIDISysExStatusComplete || ((packet->words[index2 + index3 * 2] >> 20) & 0x0f) == kMIDISysExStatusEnd)
                                 {
                                     *data = 0xf7;
                                     data++;

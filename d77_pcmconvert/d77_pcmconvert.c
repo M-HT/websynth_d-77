@@ -789,9 +789,9 @@ int main(int argc, char *argv[])
                 for (i = 0; i < bytes_per_call; i += 2)
                 {
                     uint8_t value;
-                    value = output_buffer[i];
-                    output_buffer[i] = output_buffer[i + 1];
-                    output_buffer[i + 1] = value;
+                    value = ((uint8_t *)output_buffer)[i];
+                    ((uint8_t *)output_buffer)[i] = ((uint8_t *)output_buffer)[i + 1];
+                    ((uint8_t *)output_buffer)[i + 1] = value;
                 }
             }
 #endif

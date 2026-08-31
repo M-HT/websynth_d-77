@@ -1,6 +1,6 @@
 /**
  *
- *  Copyright (C) 2025 Roman Pauer
+ *  Copyright (C) 2025-2026 Roman Pauer
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy of
  *  this software and associated documentation files (the "Software"), to deal in
@@ -69,11 +69,13 @@ extern uint8_t x87_fucom_st;
 extern uint8_t x87_fucomp_st;
 extern uint8_t x87_fxch_st;
 
-const struct
-{
+typedef struct {
     const char *name;
     uint8_t *value;
-} symbol_table_32bit[] = {
+} symbol_table_32bit_t;
+
+extern const symbol_table_32bit_t symbol_table_32bit[];
+const symbol_table_32bit_t symbol_table_32bit[] = {
     {"x87_fild_int64", &x87_fild_int64},
     {"x87_fist_int32", &x87_fist_int32},
     {"x87_fistp_int16", &x87_fistp_int16},

@@ -70,11 +70,12 @@
 
 #include "functions-32bit.h"
 
-extern const struct
-{
+typedef struct {
     const char *name;
     uint8_t *value;
-} symbol_table_32bit[];
+} symbol_table_32bit_t;
+
+extern const symbol_table_32bit_t symbol_table_32bit[];
 
 // ELF Format Cheatsheet:
 // https://gist.github.com/x0nu11byt3/bcb35c3de461e5fb66173071a2379779
@@ -304,7 +305,7 @@ error1:
     if (f == NULL)
     {
         char mapname[32];
-        sprintf(mapname, "/proc/%"PRIuMAX"/map", (uintmax_t)getpid());
+        sprintf(mapname, "/proc/%" PRIuMAX "/map", (uintmax_t)getpid());
         f = fopen(mapname, "rb");
         if (f == NULL) return NULL;
     }
@@ -316,7 +317,7 @@ error1:
     num0 = (1024*1024 + 65536 + (page_size - 1)) & ~(uintptr_t)(page_size - 1);
     while (num0 < UINT64_C(0x80000000))
     {
-        num_matches = fscanf(f, "%"SCNxMAX"%*[ -]%"SCNxMAX" %*[^\n^\r]%*[\n\r]", &num1, &num2);
+        num_matches = fscanf(f, "%" SCNxMAX "%*[ -]%" SCNxMAX " %*[^\n^\r]%*[\n\r]", &num1, &num2);
         if ((num_matches == EOF) || (num_matches < 2)) break;
 
         // num1-num2 block is used
@@ -1461,10 +1462,10 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
         ((uint64_t *)segment)[3] = str_size;
 
         if (lseek(fd, sym_offset, SEEK_SET) < 0) goto error3;
-        if (read2(fd, segment + 4 * sizeof(uint64_t), sym_size) != sym_size) goto error3;
+        if (read2(fd, segment + 4 * sizeof(uint64_t), sym_size) != (int64_t)sym_size) goto error3;
 
         if (lseek(fd, str_offset, SEEK_SET) < 0) goto error3;
-        if (read2(fd, segment + 4 * sizeof(uint64_t) + sym_size, str_size) != str_size) goto error3;
+        if (read2(fd, segment + 4 * sizeof(uint64_t) + sym_size, str_size) != (int64_t)str_size) goto error3;
 
         if (mprotect(segment, max_addr - orig_max_addr, PROT_READ) < 0) goto error3;
     }
@@ -1506,7 +1507,7 @@ static uint8_t *load_library_from_file_linux(int fd, uint64_t *libsize)
         {
             if (lseek(fd, program_header->p_offset, SEEK_SET) < 0) goto error3;
 
-            if (read2(fd, segment + page_offset, filesz) != filesz) goto error3;
+            if (read2(fd, segment + page_offset, filesz) != (int64_t)filesz) goto error3;
 
             if (program_header->p_flags & PF_X)
             {
@@ -2085,7 +2086,7 @@ error1:
     if (fd < 0) return NULL;
 
     len = lseek(fd, 0, SEEK_END);
-    if (len < sizeof(Elf64_Ehdr)) // error seeking or file is smaller than 64-bit elf header
+    if (len < (ssize_t)sizeof(Elf64_Ehdr)) // error seeking or file is smaller than 64-bit elf header
     {
         close(fd);
         return NULL;
@@ -2127,7 +2128,7 @@ error1:
         {
             dynamic_entry = (Elf64_Dyn *)(library + program_header->p_vaddr + section_offset);
 
-            if (dynamic_entry->d_tag < sizeof(dynamic_entries) / sizeof(dynamic_entries[0]))
+            if (dynamic_entry->d_tag < (ssize_t)(sizeof(dynamic_entries) / sizeof(dynamic_entries[0])))
             {
                 dynamic_entries[dynamic_entry->d_tag] = dynamic_entry->d_un.d_val;
             }

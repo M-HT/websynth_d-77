@@ -1,6 +1,6 @@
 /**
  *
- *  Copyright (C) 2025 Roman Pauer
+ *  Copyright (C) 2025-2026 Roman Pauer
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy of
  *  this software and associated documentation files (the "Software"), to deal in
@@ -25,11 +25,13 @@
 #include <stdint.h>
 #include <stddef.h>
 
-const struct
-{
+typedef struct {
     const char *name;
     uint8_t *value;
-} symbol_table_32bit[] = {
+} symbol_table_32bit_t;
+
+extern const symbol_table_32bit_t symbol_table_32bit[];
+const symbol_table_32bit_t symbol_table_32bit[] = {
     {NULL, NULL},
 };
 

@@ -23,7 +23,9 @@
  */
 
 #define _FILE_OFFSET_BITS 64
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -189,7 +191,7 @@ static void write_long_event(const uint8_t *event, unsigned int length)
     event_buffer[write_index] = 0xff000000 | length;
     write_index = (write_index + 1) & 0x7fff;
 
-    if ((write_index >= read_index) && (length > (32768 - write_index) << 2))
+    if ((write_index >= read_index) && ((int)length > (32768 - write_index) << 2))
     {
         // WebSynth D-77 doesn't support sysex fragments
         // instead of splitting the sysex into two parts, continue writing the second part into extra provided area
@@ -357,7 +359,7 @@ static void process_event(snd_seq_event_t *event)
 
         case SND_SEQ_EVENT_SYSEX:
             // WebSynth D-77 doesn't support sysex fragments
-            write_long_event(event->data.ext.ptr, event->data.ext.len);
+            write_long_event((uint8_t *)event->data.ext.ptr, event->data.ext.len);
 
 #ifdef PRINT_EVENTS
             printf("SysEx (fragment) of size %d\n", event->data.ext.len);
@@ -1335,7 +1337,7 @@ static int drop_privileges(void)
 
     printf("Dropped root privileges\n");
 
-    chdir("/");
+    if (0 != chdir("/")) {}
 
     // define some environment variables
 
@@ -1373,7 +1375,7 @@ static int start_thread(void)
     volatile int initialized;
 
     // try to increase priority (only root)
-    nice(-20);
+    if (-1 == nice(-20)) {}
 
     err = pthread_attr_init(&attr);
     if (err != 0)
@@ -1511,7 +1513,7 @@ static void main_loop(void)
     #define MONOTONIC_CLOCK_TYPE CLOCK_MONOTONIC
 #endif
 
-    for (int i = 2; i < num_subbuffers; i++)
+    for (unsigned int i = 2; i < num_subbuffers; i++)
     {
         output_subbuffer(i);
     }
